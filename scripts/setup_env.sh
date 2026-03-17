@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ "${EUID}" -ne 0 ]]; then
+  SUDO="sudo"
+else
+  SUDO=""
+fi
+
+${SUDO} apt update
+${SUDO} apt install -y \
+  ros-humble-desktop \
+  gazebo \
+  python3-colcon-common-extensions \
+  ros-humble-gazebo-ros-pkgs \
+  ros-humble-slam-toolbox \
+  ros-humble-turtlebot3 \
+  ros-humble-turtlebot3-description \
+  ros-humble-turtlebot3-gazebo \
+  ros-humble-navigation2 \
+  ros-humble-nav2-bringup \
+  ros-humble-xacro
+
+if ! grep -Fq "source /opt/ros/humble/setup.bash" "${HOME}/.bashrc"; then
+  echo "source /opt/ros/humble/setup.bash" >> "${HOME}/.bashrc"
+fi
+if ! grep -Fq "export TURTLEBOT3_MODEL=burger" "${HOME}/.bashrc"; then
+  echo "export TURTLEBOT3_MODEL=burger" >> "${HOME}/.bashrc"
+fi
+
+set +u
+source /opt/ros/humble/setup.bash
+set +u
+export TURTLEBOT3_MODEL=burger
+
+status=0
+for cmd in ros2 rviz2 gzserver colcon; do
+  if command -v "${cmd}" >/dev/null 2>&1; then
+    echo "OK   command ${cmd}"
+  else
+    echo "FAIL command ${cmd}"
+    status=1
+  fi
+done
+
+for pkg in gazebo_ros slam_toolbox turtlebot3_gazebo turtlebot3_description nav2_bringup xacro; do
+  if ros2 pkg prefix "${pkg}" >/dev/null 2>&1; then
+    echo "OK   package ${pkg}"
+  else
+    echo "FAIL package ${pkg}"
+    status=1
+  fi
+done
+
+echo "Environment setup complete"
+echo "Open a new shell or run: source /opt/ros/humble/setup.bash"
+echo "ROS environment has been persisted to ~/.bashrc"
+
+exit "${status}"
