@@ -9,5 +9,6 @@ bash "${SCRIPT_DIR}/tb3_stack.sh" start
 bash "${SCRIPT_DIR}/tb3_stack.sh" check
 
 echo "Bootstrap complete"
-echo "Next:"
-echo "  bash scripts/tb3_stack.sh rviz"
+echo "Next (new terminal, keyboard control):"
+echo "  source /opt/ros/humble/setup.bash && export TURTLEBOT3_MODEL=burger"
+echo "  ros2 run turtlebot3_teleop teleop_keyboard"

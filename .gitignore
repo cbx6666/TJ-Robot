@@ -1,0 +1,9 @@
+# colcon（在仓库根或 ros_ws 下 build 时生成，勿提交）
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/

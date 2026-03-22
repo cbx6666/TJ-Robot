@@ -8,6 +8,18 @@ else
   SUDO=""
 fi
 
+# ROS 2 Humble 的包在 packages.ros.org，不在 Ubuntu 默认源里；未添加源则 apt 找不到 ros-humble-*。
+if [[ ! -f /etc/apt/sources.list.d/ros2.list ]]; then
+  ${SUDO} apt update
+  ${SUDO} apt install -y software-properties-common curl
+  ${SUDO} add-apt-repository universe -y
+  ${SUDO} curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+    -o /usr/share/keyrings/ros-archive-keyring.gpg
+  UBUNTU_CODENAME="$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")"
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu ${UBUNTU_CODENAME} main" \
+    | ${SUDO} tee /etc/apt/sources.list.d/ros2.list >/dev/null
+fi
+
 ${SUDO} apt update
 ${SUDO} apt install -y \
   ros-humble-desktop \

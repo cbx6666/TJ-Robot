@@ -58,6 +58,13 @@ bash scripts/tb3_stack.sh start
 - 生成 Burger 机器人
 - 启动 `slam_toolbox`
 - 生成 RViz 配置 `/tmp/tb3_stack/tb3_auto.rviz`
+- 启动 **`gzclient`（Gazebo 3D 窗口）** 与 **`rviz2`（2D 地图 / 激光等）**
+
+无界面运行（例如仅跑自动化检查）时可设置：
+
+```bash
+TB3_NO_GUI=1 bash scripts/tb3_stack.sh start
+```
 
 ### 4. 日常检查
 
@@ -77,7 +84,27 @@ bash scripts/tb3_stack.sh check
 - `/map_metadata`
 - `map -> odom` TF
 
-### 5. 打开 RViz
+### 5. 键盘遥控机器人（新开一个终端）
+
+`start` 已拉起仿真与 SLAM，再开一个终端执行：
+
+```bash
+source /opt/ros/humble/setup.bash
+export TURTLEBOT3_MODEL=burger
+ros2 run turtlebot3_teleop teleop_keyboard
+```
+
+终端里会打印按键说明，常见为：
+
+- **移动**：`w` 前进、`x` 后退、`a` / `d` 左转 / 右转
+- **停止**：`s` 或 `Space`
+- **调节线速度 / 角速度**：`q` `e` `z` `c` 等（以终端提示为准）
+
+让车动起来后，SLAM 才会持续收到新观测，**栅格地图**在 RViz 里会逐渐补全。
+
+### 6. 仅再开 RViz（可选）
+
+若已用 `start` 打开过 RViz，一般不必重复。若之前用 `TB3_NO_GUI=1` 启动或关闭了 RViz，可单独执行：
 
 ```bash
 bash scripts/tb3_stack.sh rviz
@@ -89,11 +116,13 @@ bash scripts/tb3_stack.sh rviz
 - 自动加载生成的 RViz 配置
 - 默认显示 `TF / LaserScan / Odometry / Map / RobotModel`
 
-### 6. 停止运行栈
+### 7. 停止运行栈
 
 ```bash
 bash scripts/tb3_stack.sh stop
 ```
+
+会一并结束 `gzserver`、`gzclient`、`rviz2` 与 SLAM 等进程。
 
 ## 日志
 
@@ -109,10 +138,22 @@ bash scripts/tb3_stack.sh stop
 bash scripts/tb3_stack.sh logs all
 ```
 
-查看 Gazebo：
+查看 Gazebo 服务端：
 
 ```bash
 bash scripts/tb3_stack.sh logs gzserver
+```
+
+查看 Gazebo 3D 客户端：
+
+```bash
+bash scripts/tb3_stack.sh logs gzclient
+```
+
+查看 RViz：
+
+```bash
+bash scripts/tb3_stack.sh logs rviz
 ```
 
 查看 `robot_state_publisher`：

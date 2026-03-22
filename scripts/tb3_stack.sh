@@ -3,7 +3,17 @@
 set -euo pipefail
 
 set +u
-source /opt/ros/humble/setup.bash
+ROS_SETUP_BASH="${ROS_SETUP_BASH:-/opt/ros/humble/setup.bash}"
+if [[ ! -f "${ROS_SETUP_BASH}" ]]; then
+  echo "ERROR: 未找到 ROS 2 环境脚本: ${ROS_SETUP_BASH}" >&2
+  echo "本项目默认使用 ROS 2 Humble。在 Ubuntu / WSL 上请先安装依赖：" >&2
+  echo "  bash scripts/setup_env.sh" >&2
+  echo "安装完成后请新开终端，或执行: source /opt/ros/humble/setup.bash" >&2
+  echo "若 Humble 装在其他路径，可设置: export ROS_SETUP_BASH=/path/to/setup.bash" >&2
+  exit 1
+fi
+# shellcheck source=/dev/null
+source "${ROS_SETUP_BASH}"
 set +u
 
 export TURTLEBOT3_MODEL="${TURTLEBOT3_MODEL:-burger}"
@@ -23,6 +33,7 @@ cleanup_old() {
   pkill -9 gzserver 2>/dev/null || true
   pkill -9 gzclient 2>/dev/null || true
   pkill -9 -f gazebo 2>/dev/null || true
+  pkill -9 -x rviz2 2>/dev/null || true
   pkill -9 -f robot_state_publisher 2>/dev/null || true
   pkill -9 -f '/robot_description std_msgs/msg/String' 2>/dev/null || true
   pkill -9 -f slam_toolbox 2>/dev/null || true
@@ -340,10 +351,10 @@ EOF
 }
 
 do_start() {
-  echo "[1/8] Cleaning old processes"
+  echo "[1/9] Cleaning old processes"
   cleanup_old
 
-  echo "[2/8] Starting gzserver"
+  echo "[2/9] Starting gzserver"
   setsid gzserver "${WORLD_FILE}" --verbose -s libgazebo_ros_init.so -s libgazebo_ros_factory.so \
     >"${LOG_DIR}/gzserver.log" 2>&1 < /dev/null &
   local gz_pid=$!
@@ -354,7 +365,7 @@ do_start() {
     exit 1
   fi
 
-  echo "[3/8] Expanding URDF and starting robot_state_publisher"
+  echo "[3/9] Expanding URDF and starting robot_state_publisher"
   ros2 run xacro xacro "/opt/ros/humble/share/turtlebot3_description/urdf/turtlebot3_${TURTLEBOT3_MODEL}.urdf" >"${URDF_FILE}"
   setsid ros2 run robot_state_publisher robot_state_publisher "${URDF_FILE}" --ros-args -p use_sim_time:=true \
     >"${LOG_DIR}/robot_state_publisher.log" 2>&1 < /dev/null &
@@ -366,17 +377,17 @@ do_start() {
     exit 1
   fi
 
-  echo "[4/8] Publishing /robot_description"
+  echo "[4/9] Publishing /robot_description"
   publish_robot_description
 
-  echo "[5/8] Spawning TurtleBot3 entity"
+  echo "[5/9] Spawning TurtleBot3 entity"
   ros2 run gazebo_ros spawn_entity.py \
     -entity "${TURTLEBOT3_MODEL}" \
     -file "${MODEL_FILE}" \
     -x -2.0 -y -0.5 -z 0.1 \
     >"${LOG_DIR}/spawn_entity.log" 2>&1
 
-  echo "[6/8] Starting slam_toolbox"
+  echo "[6/9] Starting slam_toolbox"
   setsid ros2 launch slam_toolbox online_async_launch.py \
     use_sim_time:=true \
     base_frame:=base_footprint \
@@ -391,10 +402,10 @@ do_start() {
     exit 1
   fi
 
-  echo "[7/8] Generating RViz config"
+  echo "[7/9] Generating RViz config"
   generate_rviz_config
 
-  echo "[8/8] Verifying key topics"
+  echo "[8/9] Verifying key topics"
   for topic in /clock /scan /odom /tf /tf_static /robot_description /map /map_metadata; do
     if ros2 topic list | grep -qx "${topic}"; then
       echo "  OK  ${topic}"
@@ -403,19 +414,51 @@ do_start() {
     fi
   done
 
+  local gzclient_pid=""
+  local rviz_pid=""
+  if [[ "${TB3_NO_GUI:-0}" == "1" ]]; then
+    echo "[9/9] Skipping gzclient and RViz2 (TB3_NO_GUI=1)"
+  else
+    echo "[9/9] Starting gzclient and RViz2"
+    setsid gzclient \
+      >"${LOG_DIR}/gzclient.log" 2>&1 < /dev/null &
+    gzclient_pid=$!
+
+    export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
+    export QT_XCB_GL_INTEGRATION="${QT_XCB_GL_INTEGRATION:-none}"
+    export MESA_GL_VERSION_OVERRIDE="${MESA_GL_VERSION_OVERRIDE:-3.3}"
+    export MESA_GLSL_VERSION_OVERRIDE="${MESA_GLSL_VERSION_OVERRIDE:-330}"
+
+    setsid rviz2 -d "${RVIZ_CONFIG_FILE}" --ros-args -p use_sim_time:=true \
+      >"${LOG_DIR}/rviz2.log" 2>&1 < /dev/null &
+    rviz_pid=$!
+  fi
+
   echo
   echo "PIDs:"
   echo "  gzserver: ${gz_pid}"
   echo "  robot_state_publisher: ${rsp_pid}"
   echo "  slam_toolbox: ${slam_pid}"
+  if [[ -n "${gzclient_pid}" ]]; then
+    echo "  gzclient: ${gzclient_pid}"
+  fi
+  if [[ -n "${rviz_pid}" ]]; then
+    echo "  rviz2: ${rviz_pid}"
+  fi
   echo
   echo "Logs: ${LOG_DIR}"
   echo "RViz config: ${RVIZ_CONFIG_FILE}"
+  if [[ "${TB3_NO_GUI:-0}" != "1" ]]; then
+    echo
+    echo "Keyboard teleop (new terminal):"
+    echo "  source /opt/ros/humble/setup.bash && export TURTLEBOT3_MODEL=\${TURTLEBOT3_MODEL:-burger}"
+    echo "  ros2 run turtlebot3_teleop teleop_keyboard"
+  fi
 }
 
 do_stop() {
   cleanup_old
-  echo "Stopped Gazebo, robot_state_publisher, robot_description publisher, and slam_toolbox"
+  echo "Stopped Gazebo (gzserver/gzclient), RViz2, robot_state_publisher, robot_description publisher, and slam_toolbox"
 }
 
 do_check() {
@@ -456,6 +499,12 @@ do_logs() {
     gzserver)
       tail -f "${LOG_DIR}/gzserver.log"
       ;;
+    gzclient)
+      tail -f "${LOG_DIR}/gzclient.log"
+      ;;
+    rviz|rviz2)
+      tail -f "${LOG_DIR}/rviz2.log"
+      ;;
     rsp|robot_state_publisher)
       tail -f "${LOG_DIR}/robot_state_publisher.log"
       ;;
@@ -474,7 +523,7 @@ do_logs() {
       ;;
     *)
       echo "Unknown log target: ${target}"
-      echo "Use one of: all, gzserver, rsp, slam, robot_description, spawn"
+      echo "Use one of: all, gzserver, gzclient, rviz, rsp, slam, robot_description, spawn"
       exit 1
       ;;
   esac
@@ -487,7 +536,10 @@ Usage:
   bash scripts/tb3_stack.sh stop
   bash scripts/tb3_stack.sh check
   bash scripts/tb3_stack.sh rviz
-  bash scripts/tb3_stack.sh logs [all|gzserver|rsp|slam|robot_description|spawn]
+  bash scripts/tb3_stack.sh logs [all|gzserver|gzclient|rviz|rsp|slam|robot_description|spawn]
+
+Environment:
+  TB3_NO_GUI=1   Skip gzclient and RViz2 on start (headless / CI)
 EOF
 }
 
