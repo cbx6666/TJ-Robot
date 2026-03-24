@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 set +u
 ROS_SETUP_BASH="${ROS_SETUP_BASH:-/opt/ros/humble/setup.bash}"
 if [[ ! -f "${ROS_SETUP_BASH}" ]]; then
@@ -19,15 +21,40 @@ set +u
 export TURTLEBOT3_MODEL="${TURTLEBOT3_MODEL:-burger}"
 export GAZEBO_MODEL_DATABASE_URI="${GAZEBO_MODEL_DATABASE_URI:-}"
 export GAZEBO_MODEL_PATH="${GAZEBO_MODEL_PATH:-/usr/share/gazebo-11/models:/opt/ros/humble/share/turtlebot3_gazebo/models:/opt/ros/humble/share/turtlebot3_description}"
+if [[ -d "/opt/ros/humble/lib" ]]; then
+  export GAZEBO_PLUGIN_PATH="/opt/ros/humble/lib${GAZEBO_PLUGIN_PATH:+:${GAZEBO_PLUGIN_PATH}}"
+fi
 export TB3_LOG_DIR="${TB3_LOG_DIR:-/tmp/tb3_stack}"
 
-WORLD_FILE="/opt/ros/humble/share/turtlebot3_gazebo/worlds/turtlebot3_world.world"
-MODEL_FILE="/opt/ros/humble/share/turtlebot3_gazebo/models/turtlebot3_${TURTLEBOT3_MODEL}/model.sdf"
-URDF_FILE="/tmp/tb3_${TURTLEBOT3_MODEL}.urdf"
+WORLD_FILE="${WORLD_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/world/test1.world}"
+MODEL_FILE="${MODEL_FILE:-/opt/ros/humble/share/turtlebot3_gazebo/models/turtlebot3_${TURTLEBOT3_MODEL}/model.sdf}"
+URDF_FILE="${URDF_FILE:-/tmp/tb3_${TURTLEBOT3_MODEL}.urdf}"
+MAP_PGM_FILE="${MAP_PGM_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/maps/test1.pgm}"
+MAP_YAML_FILE="${MAP_YAML_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/maps/test1.yaml}"
 LOG_DIR="${TB3_LOG_DIR}"
-RVIZ_CONFIG_FILE="${LOG_DIR}/tb3_auto.rviz"
+RVIZ_CONFIG_FILE="${RVIZ_CONFIG_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/config/test1.rviz}"
+OBSTACLE_ENTITY_NAME="${OBSTACLE_ENTITY_NAME:-moving_obstacle_1}"
+OBSTACLE_SDF_FILE="${OBSTACLE_SDF_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/models/moving_obstacle.sdf}"
+OBSTACLE_MOVER_FILE="${OBSTACLE_MOVER_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/scripts/moving_obstacle_controller.py}"
+OBSTACLE_START_X="${OBSTACLE_START_X:-0.8}"
+OBSTACLE_START_Y="${OBSTACLE_START_Y:-0.0}"
+OBSTACLE_START_Z="${OBSTACLE_START_Z:-0.2}"
+OBSTACLE_CENTER_X="${OBSTACLE_CENTER_X:-0.8}"
+OBSTACLE_CENTER_Y="${OBSTACLE_CENTER_Y:-0.0}"
+OBSTACLE_AMPLITUDE_X="${OBSTACLE_AMPLITUDE_X:-0.8}"
+OBSTACLE_AMPLITUDE_Y="${OBSTACLE_AMPLITUDE_Y:-0.6}"
+OBSTACLE_FREQUENCY="${OBSTACLE_FREQUENCY:-0.25}"
+OBSTACLE_RATE_HZ="${OBSTACLE_RATE_HZ:-20.0}"
+OBSTACLE_FALLBACK_RATE_HZ="${OBSTACLE_FALLBACK_RATE_HZ:-5.0}"
+OBSTACLE_TRAJECTORY="${OBSTACLE_TRAJECTORY:-line}"
+OBSTACLE_LISSAJOUS_AX="${OBSTACLE_LISSAJOUS_AX:-3.0}"
+OBSTACLE_LISSAJOUS_AY="${OBSTACLE_LISSAJOUS_AY:-2.0}"
+OBSTACLE_LISSAJOUS_PHASE="${OBSTACLE_LISSAJOUS_PHASE:-1.57079632679}"
+OBSTACLE_PATROL_SPEED="${OBSTACLE_PATROL_SPEED:-0.6}"
+GAZEBO_STATE_PLUGIN="${GAZEBO_STATE_PLUGIN:-/opt/ros/humble/lib/libgazebo_ros_state.so}"
 
 mkdir -p "${LOG_DIR}"
+mkdir -p "$(dirname "${RVIZ_CONFIG_FILE}")"
 
 cleanup_old() {
   pkill -9 gzserver 2>/dev/null || true
@@ -38,6 +65,31 @@ cleanup_old() {
   pkill -9 -f '/robot_description std_msgs/msg/String' 2>/dev/null || true
   pkill -9 -f slam_toolbox 2>/dev/null || true
   pkill -9 -f async_slam_toolbox_node 2>/dev/null || true
+  pkill -9 -f tb3_moving_obstacle.py 2>/dev/null || true
+}
+
+resolve_set_entity_state_service() {
+  local found_service
+  found_service="$(ros2 service list | grep -E '/set_entity_state$' | head -n 1 || true)"
+  if [[ -n "${found_service}" ]]; then
+    echo "${found_service}"
+    return 0
+  fi
+  return 1
+}
+
+wait_for_set_entity_state_service() {
+  local timeout_s="${1:-20}"
+  local deadline=$((SECONDS + timeout_s))
+  while (( SECONDS < deadline )); do
+    local service_name
+    if service_name="$(resolve_set_entity_state_service)"; then
+      echo "${service_name}"
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
 }
 
 wait_for_service() {
@@ -351,11 +403,22 @@ EOF
 }
 
 do_start() {
-  echo "[1/9] Cleaning old processes"
+  echo "[1/11] Cleaning old processes"
   cleanup_old
 
-  echo "[2/9] Starting gzserver"
-  setsid gzserver "${WORLD_FILE}" --verbose -s libgazebo_ros_init.so -s libgazebo_ros_factory.so \
+  echo "[2/11] Using world: ${WORLD_FILE}"
+  echo "[2/11] Using map pgm: ${MAP_PGM_FILE}, yaml: ${MAP_YAML_FILE}"
+
+  local state_plugin_arg="-s libgazebo_ros_state.so"
+  if [[ -f "${GAZEBO_STATE_PLUGIN}" ]]; then
+    state_plugin_arg="-s ${GAZEBO_STATE_PLUGIN}"
+  else
+    echo "[2/11] WARNING: state plugin file not found at ${GAZEBO_STATE_PLUGIN}"
+    echo "[2/11] Will try plugin name libgazebo_ros_state.so via GAZEBO_PLUGIN_PATH"
+  fi
+
+  echo "[2/11] Starting gzserver"
+  setsid gzserver "${WORLD_FILE}" --verbose -s libgazebo_ros_init.so -s libgazebo_ros_factory.so ${state_plugin_arg} \
     >"${LOG_DIR}/gzserver.log" 2>&1 < /dev/null &
   local gz_pid=$!
 
@@ -365,7 +428,7 @@ do_start() {
     exit 1
   fi
 
-  echo "[3/9] Expanding URDF and starting robot_state_publisher"
+  echo "[3/11] Expanding URDF and starting robot_state_publisher"
   ros2 run xacro xacro "/opt/ros/humble/share/turtlebot3_description/urdf/turtlebot3_${TURTLEBOT3_MODEL}.urdf" >"${URDF_FILE}"
   setsid ros2 run robot_state_publisher robot_state_publisher "${URDF_FILE}" --ros-args -p use_sim_time:=true \
     >"${LOG_DIR}/robot_state_publisher.log" 2>&1 < /dev/null &
@@ -377,17 +440,76 @@ do_start() {
     exit 1
   fi
 
-  echo "[4/9] Publishing /robot_description"
+  echo "[4/11] Publishing /robot_description"
   publish_robot_description
 
-  echo "[5/9] Spawning TurtleBot3 entity"
+  echo "[5/11] Spawning TurtleBot3 entity"
   ros2 run gazebo_ros spawn_entity.py \
     -entity "${TURTLEBOT3_MODEL}" \
     -file "${MODEL_FILE}" \
     -x -2.0 -y -0.5 -z 0.1 \
     >"${LOG_DIR}/spawn_entity.log" 2>&1
 
-  echo "[6/9] Starting slam_toolbox"
+  echo "[6/11] Spawning moving obstacle"
+  if [[ ! -f "${OBSTACLE_SDF_FILE}" ]]; then
+    echo "[6/11] ERROR: obstacle model not found: ${OBSTACLE_SDF_FILE}"
+    exit 1
+  fi
+  ros2 run gazebo_ros spawn_entity.py \
+    -entity "${OBSTACLE_ENTITY_NAME}" \
+    -file "${OBSTACLE_SDF_FILE}" \
+    -x "${OBSTACLE_START_X}" -y "${OBSTACLE_START_Y}" -z "${OBSTACLE_START_Z}" \
+    >"${LOG_DIR}/spawn_obstacle.log" 2>&1
+
+  local obstacle_mover_pid=""
+  local set_entity_state_service=""
+  if [[ ! -f "${OBSTACLE_MOVER_FILE}" ]]; then
+    echo "[7/11] WARNING: obstacle controller not found: ${OBSTACLE_MOVER_FILE}"
+  elif set_entity_state_service="$(wait_for_set_entity_state_service 20)"; then
+    echo "[7/11] Starting moving obstacle controller (${set_entity_state_service})"
+    setsid python3 "${OBSTACLE_MOVER_FILE}" \
+      --mode ros \
+      --entity-name "${OBSTACLE_ENTITY_NAME}" \
+      --service-name "${set_entity_state_service}" \
+      --center-x "${OBSTACLE_CENTER_X}" \
+      --center-y "${OBSTACLE_CENTER_Y}" \
+      --z "${OBSTACLE_START_Z}" \
+      --amplitude-x "${OBSTACLE_AMPLITUDE_X}" \
+      --amplitude-y "${OBSTACLE_AMPLITUDE_Y}" \
+      --frequency "${OBSTACLE_FREQUENCY}" \
+      --trajectory "${OBSTACLE_TRAJECTORY}" \
+      --lissajous-ax "${OBSTACLE_LISSAJOUS_AX}" \
+      --lissajous-ay "${OBSTACLE_LISSAJOUS_AY}" \
+      --lissajous-phase "${OBSTACLE_LISSAJOUS_PHASE}" \
+      --patrol-speed "${OBSTACLE_PATROL_SPEED}" \
+      --rate-hz "${OBSTACLE_RATE_HZ}" \
+      >"${LOG_DIR}/moving_obstacle.log" 2>&1 < /dev/null &
+    obstacle_mover_pid=$!
+  elif command -v gz >/dev/null 2>&1; then
+    echo "[7/11] WARNING: no set_entity_state service found, using gz model fallback"
+    echo "[7/11] fallback rate_hz=${OBSTACLE_FALLBACK_RATE_HZ} (set OBSTACLE_FALLBACK_RATE_HZ to adjust)"
+    setsid python3 "${OBSTACLE_MOVER_FILE}" \
+      --mode gz \
+      --entity-name "${OBSTACLE_ENTITY_NAME}" \
+      --center-x "${OBSTACLE_CENTER_X}" \
+      --center-y "${OBSTACLE_CENTER_Y}" \
+      --z "${OBSTACLE_START_Z}" \
+      --amplitude-x "${OBSTACLE_AMPLITUDE_X}" \
+      --amplitude-y "${OBSTACLE_AMPLITUDE_Y}" \
+      --frequency "${OBSTACLE_FREQUENCY}" \
+      --trajectory "${OBSTACLE_TRAJECTORY}" \
+      --lissajous-ax "${OBSTACLE_LISSAJOUS_AX}" \
+      --lissajous-ay "${OBSTACLE_LISSAJOUS_AY}" \
+      --lissajous-phase "${OBSTACLE_LISSAJOUS_PHASE}" \
+      --patrol-speed "${OBSTACLE_PATROL_SPEED}" \
+      --rate-hz "${OBSTACLE_FALLBACK_RATE_HZ}" \
+      >"${LOG_DIR}/moving_obstacle.log" 2>&1 < /dev/null &
+    obstacle_mover_pid=$!
+  else
+    echo "[7/11] WARNING: no set_entity_state service and no gz command found"
+  fi
+
+  echo "[8/11] Starting slam_toolbox"
   setsid ros2 launch slam_toolbox online_async_launch.py \
     use_sim_time:=true \
     base_frame:=base_footprint \
@@ -402,10 +524,15 @@ do_start() {
     exit 1
   fi
 
-  echo "[7/9] Generating RViz config"
-  generate_rviz_config
+  echo "[9/11] Preparing RViz config"
+  if [[ -f "${RVIZ_CONFIG_FILE}" ]]; then
+    echo "[9/11] Using existing RViz config: ${RVIZ_CONFIG_FILE}"
+  else
+    echo "[9/11] RViz config not found, generating default: ${RVIZ_CONFIG_FILE}"
+    generate_rviz_config
+  fi
 
-  echo "[8/9] Verifying key topics"
+  echo "[10/11] Verifying key topics"
   for topic in /clock /scan /odom /tf /tf_static /robot_description /map /map_metadata; do
     if ros2 topic list | grep -qx "${topic}"; then
       echo "  OK  ${topic}"
@@ -417,9 +544,9 @@ do_start() {
   local gzclient_pid=""
   local rviz_pid=""
   if [[ "${TB3_NO_GUI:-0}" == "1" ]]; then
-    echo "[9/9] Skipping gzclient and RViz2 (TB3_NO_GUI=1)"
+    echo "[11/11] Skipping gzclient and RViz2 (TB3_NO_GUI=1)"
   else
-    echo "[9/9] Starting gzclient and RViz2"
+    echo "[11/11] Starting gzclient and RViz2"
     setsid gzclient \
       >"${LOG_DIR}/gzclient.log" 2>&1 < /dev/null &
     gzclient_pid=$!
@@ -439,6 +566,9 @@ do_start() {
   echo "  gzserver: ${gz_pid}"
   echo "  robot_state_publisher: ${rsp_pid}"
   echo "  slam_toolbox: ${slam_pid}"
+  if [[ -n "${obstacle_mover_pid}" ]]; then
+    echo "  moving_obstacle_controller: ${obstacle_mover_pid}"
+  fi
   if [[ -n "${gzclient_pid}" ]]; then
     echo "  gzclient: ${gzclient_pid}"
   fi
@@ -448,6 +578,7 @@ do_start() {
   echo
   echo "Logs: ${LOG_DIR}"
   echo "RViz config: ${RVIZ_CONFIG_FILE}"
+  echo "Moving obstacle log: ${LOG_DIR}/moving_obstacle.log"
   if [[ "${TB3_NO_GUI:-0}" != "1" ]]; then
     echo
     echo "Keyboard teleop (new terminal):"
@@ -484,7 +615,12 @@ do_rviz() {
   export MESA_GL_VERSION_OVERRIDE="${MESA_GL_VERSION_OVERRIDE:-3.3}"
   export MESA_GLSL_VERSION_OVERRIDE="${MESA_GLSL_VERSION_OVERRIDE:-330}"
 
-  generate_rviz_config
+  if [[ -f "${RVIZ_CONFIG_FILE}" ]]; then
+    echo "Using existing RViz config: ${RVIZ_CONFIG_FILE}"
+  else
+    echo "RViz config not found, generating default: ${RVIZ_CONFIG_FILE}"
+    generate_rviz_config
+  fi
 
   echo "Starting RViz with software rendering for WSL compatibility"
   echo "Using config: ${RVIZ_CONFIG_FILE}"
@@ -517,13 +653,22 @@ do_logs() {
     spawn|spawn_entity)
       tail -f "${LOG_DIR}/spawn_entity.log"
       ;;
+    obstacle|moving_obstacle)
+      if [[ -f "${LOG_DIR}/moving_obstacle.log" ]]; then
+        tail -f "${LOG_DIR}/moving_obstacle.log"
+      else
+        echo "No obstacle log yet: ${LOG_DIR}/moving_obstacle.log"
+        echo "Start stack first: bash scripts/tb3_stack.sh start"
+        exit 1
+      fi
+      ;;
     all)
       echo "Available logs:"
       ls -1 "${LOG_DIR}"
       ;;
     *)
       echo "Unknown log target: ${target}"
-      echo "Use one of: all, gzserver, gzclient, rviz, rsp, slam, robot_description, spawn"
+      echo "Use one of: all, gzserver, gzclient, rviz, rsp, slam, robot_description, spawn, obstacle"
       exit 1
       ;;
   esac
@@ -536,10 +681,16 @@ Usage:
   bash scripts/tb3_stack.sh stop
   bash scripts/tb3_stack.sh check
   bash scripts/tb3_stack.sh rviz
-  bash scripts/tb3_stack.sh logs [all|gzserver|gzclient|rviz|rsp|slam|robot_description|spawn]
+  bash scripts/tb3_stack.sh logs [all|gzserver|gzclient|rviz|rsp|slam|robot_description|spawn|obstacle]
 
 Environment:
   TB3_NO_GUI=1   Skip gzclient and RViz2 on start (headless / CI)
+  RVIZ_CONFIG_FILE=<path>  RViz config path (default: robot_bringup/config/test1.rviz)
+  WORLD_FILE=<path>   Gazebo world file override (default: robot_bringup/world/test1.world)
+  MAP_PGM_FILE=<path>  Static map image path for map server or nav stack (default: robot_bringup/maps/test1.pgm)
+  MAP_YAML_FILE=<path> Static map yaml path (default: robot_bringup/maps/test1.yaml)
+  OBSTACLE_TRAJECTORY=[line|circle|figure8|lissajous|patrol]
+  OBSTACLE_FALLBACK_RATE_HZ=5.0  Update rate used only in gz fallback mode
 EOF
 }
 
