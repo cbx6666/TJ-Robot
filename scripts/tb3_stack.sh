@@ -51,7 +51,6 @@ OBSTACLE_LISSAJOUS_AX="${OBSTACLE_LISSAJOUS_AX:-3.0}"
 OBSTACLE_LISSAJOUS_AY="${OBSTACLE_LISSAJOUS_AY:-2.0}"
 OBSTACLE_LISSAJOUS_PHASE="${OBSTACLE_LISSAJOUS_PHASE:-1.57079632679}"
 OBSTACLE_PATROL_SPEED="${OBSTACLE_PATROL_SPEED:-0.6}"
-GAZEBO_STATE_PLUGIN="${GAZEBO_STATE_PLUGIN:-/opt/ros/humble/lib/libgazebo_ros_state.so}"
 
 mkdir -p "${LOG_DIR}"
 mkdir -p "$(dirname "${RVIZ_CONFIG_FILE}")"
@@ -66,6 +65,7 @@ cleanup_old() {
   pkill -9 -f slam_toolbox 2>/dev/null || true
   pkill -9 -f async_slam_toolbox_node 2>/dev/null || true
   pkill -9 -f tb3_moving_obstacle.py 2>/dev/null || true
+  pkill -9 -f moving_obstacle_controller.py 2>/dev/null || true
 }
 
 resolve_set_entity_state_service() {
@@ -409,16 +409,8 @@ do_start() {
   echo "[2/11] Using world: ${WORLD_FILE}"
   echo "[2/11] Using map pgm: ${MAP_PGM_FILE}, yaml: ${MAP_YAML_FILE}"
 
-  local state_plugin_arg="-s libgazebo_ros_state.so"
-  if [[ -f "${GAZEBO_STATE_PLUGIN}" ]]; then
-    state_plugin_arg="-s ${GAZEBO_STATE_PLUGIN}"
-  else
-    echo "[2/11] WARNING: state plugin file not found at ${GAZEBO_STATE_PLUGIN}"
-    echo "[2/11] Will try plugin name libgazebo_ros_state.so via GAZEBO_PLUGIN_PATH"
-  fi
-
   echo "[2/11] Starting gzserver"
-  setsid gzserver "${WORLD_FILE}" --verbose -s libgazebo_ros_init.so -s libgazebo_ros_factory.so ${state_plugin_arg} \
+  setsid gzserver "${WORLD_FILE}" --verbose -s libgazebo_ros_init.so -s libgazebo_ros_factory.so \
     >"${LOG_DIR}/gzserver.log" 2>&1 < /dev/null &
   local gz_pid=$!
 
