@@ -13,7 +13,6 @@ setup(
     install_requires=["setuptools"],
     zip_safe=True,
     maintainer="dev",
-    maintainer_email="dev@example.com",
     description="Task orchestration and mission logic.",
     license="MIT",
 )

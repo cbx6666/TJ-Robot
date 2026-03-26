@@ -3,7 +3,6 @@
   <name>robot_bringup</name>
   <version>0.0.1</version>
   <description>Launch and configuration entrypoints for the indoor service robot stack.</description>
-  <maintainer email="dev@example.com">dev</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

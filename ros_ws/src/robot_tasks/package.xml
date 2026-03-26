@@ -3,7 +3,6 @@
   <name>robot_tasks</name>
   <version>0.0.1</version>
   <description>Task orchestration and mission logic for the indoor service robot.</description>
-  <maintainer email="dev@example.com">dev</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_python</buildtool_depend>
