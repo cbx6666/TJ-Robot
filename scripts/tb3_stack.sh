@@ -33,6 +33,10 @@ MAP_PGM_FILE="${MAP_PGM_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/maps/tes
 MAP_YAML_FILE="${MAP_YAML_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/maps/test1.yaml}"
 LOG_DIR="${TB3_LOG_DIR}"
 RVIZ_CONFIG_FILE="${RVIZ_CONFIG_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/config/test1.rviz}"
+ROBOT_START_X="${ROBOT_START_X:--2.0}"
+ROBOT_START_Y="${ROBOT_START_Y:--1.2}"
+ROBOT_START_Z="${ROBOT_START_Z:-0.1}"
+ROBOT_START_YAW="${ROBOT_START_YAW:-0.0}"
 OBSTACLE_ENTITY_NAME="${OBSTACLE_ENTITY_NAME:-moving_obstacle_1}"
 OBSTACLE_SDF_FILE="${OBSTACLE_SDF_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/models/moving_obstacle.sdf}"
 OBSTACLE_MOVER_FILE="${OBSTACLE_MOVER_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/scripts/moving_obstacle_controller.py}"
@@ -439,7 +443,7 @@ do_start() {
   ros2 run gazebo_ros spawn_entity.py \
     -entity "${TURTLEBOT3_MODEL}" \
     -file "${MODEL_FILE}" \
-    -x -2.0 -y -0.5 -z 0.1 \
+    -x "${ROBOT_START_X}" -y "${ROBOT_START_Y}" -z "${ROBOT_START_Z}" -Y "${ROBOT_START_YAW}" \
     >"${LOG_DIR}/spawn_entity.log" 2>&1
 
   echo "[6/11] Spawning moving obstacle"
@@ -681,6 +685,10 @@ Environment:
   WORLD_FILE=<path>   Gazebo world file override (default: robot_bringup/world/test1.world)
   MAP_PGM_FILE=<path>  Static map image path for map server or nav stack (default: robot_bringup/maps/test1.pgm)
   MAP_YAML_FILE=<path> Static map yaml path (default: robot_bringup/maps/test1.yaml)
+  ROBOT_START_X=-2.0  Robot spawn x in Gazebo world
+  ROBOT_START_Y=-1.2  Robot spawn y in Gazebo world
+  ROBOT_START_Z=0.1   Robot spawn z in Gazebo world
+  ROBOT_START_YAW=0.0 Robot spawn yaw in Gazebo world
   OBSTACLE_TRAJECTORY=[line|circle|figure8|lissajous|patrol]
   OBSTACLE_FALLBACK_RATE_HZ=5.0  Update rate used only in gz fallback mode
 EOF

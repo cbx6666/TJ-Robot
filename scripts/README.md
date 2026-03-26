@@ -1,26 +1,19 @@
-# Scripts
+﻿# Scripts
 
-这个目录负责项目的基础环境安装、基础运行栈启动、健康检查、RViz 启动和日志查看。
+这个目录负责环境安装、基础仿真拉起、运行检查、RViz 启动和日志查看。
 
 ## 脚本职责
 
 - `setup_env.sh`
-  负责安装基础依赖，并把 ROS 环境和 `TURTLEBOT3_MODEL=burger` 写入 `~/.bashrc`。
-  安装完成后会自动检查核心命令和关键 ROS 包。
-
+  安装 ROS 2 Humble、Gazebo、TurtleBot3、SLAM、Nav2、`colcon`，并安装自定义 ROS Python 节点需要的依赖，例如 `rclpy`、`geometry_msgs`、`nav_msgs`。
 - `bootstrap.sh`
-  负责一键串联完整流程。
-  它会依次执行：
-  1. `setup_env.sh`
-  2. `tb3_stack.sh start`
-  3. `tb3_stack.sh check`
-
+  一键执行环境安装、基础运行栈启动和健康检查。
 - `tb3_stack.sh`
-  负责日常运行控制，包括启动、停止、检查、打开 RViz、查看日志。
+  负责日常运行控制，包括启动、停止、检查、单独打开 RViz 和查看日志。
 
 ## 推荐使用方式
 
-### 1. 第一次配置环境
+### 1. 首次配置环境
 
 ```bash
 bash scripts/setup_env.sh
@@ -28,11 +21,13 @@ bash scripts/setup_env.sh
 
 这一步会自动：
 
-- 安装 ROS 2、Gazebo、TurtleBot3、SLAM、Nav2、colcon
-- 把 ROS 环境写入 `~/.bashrc`
+- 安装 ROS 2、Gazebo、TurtleBot3、SLAM、Nav2、`colcon`
+- 安装 ROS Python 依赖：`rclpy`、`geometry_msgs`、`nav_msgs`
+- 把 `source /opt/ros/humble/setup.bash` 写入 `~/.bashrc`
 - 把 `TURTLEBOT3_MODEL=burger` 写入 `~/.bashrc`
 - 检查 `ros2`、`rviz2`、`gzserver`、`colcon`
 - 检查关键 ROS 包是否可发现
+- 检查 Python 能否导入 `rclpy`、`geometry_msgs`、`nav_msgs`
 
 ### 2. 一键完成安装、启动、检查
 
@@ -55,12 +50,30 @@ bash scripts/tb3_stack.sh start
 - 展开 TurtleBot3 URDF
 - 启动 `robot_state_publisher`
 - 持续发布 `/robot_description`
-- 生成 Burger 机器人
+- 生成 TurtleBot3 机器人
+- 生成动态障碍物并启动其控制器
 - 启动 `slam_toolbox`
-- 生成 RViz 配置 `/tmp/tb3_stack/tb3_auto.rviz`
-- 启动 **`gzclient`（Gazebo 3D 窗口）** 与 **`rviz2`（2D 地图 / 激光等）**
+- 生成或加载 RViz 配置
+- 启动 `gzclient` 和 `rviz2`
 
-无界面运行（例如仅跑自动化检查）时可设置：
+默认机器人出生点：
+
+- `x=-2.0`
+- `y=-1.2`
+- `z=0.1`
+- `yaw=0.0`
+
+如果需要修改机器人出生点：
+
+```bash
+ROBOT_START_X=-2.0 \
+ROBOT_START_Y=-1.6 \
+ROBOT_START_Z=0.1 \
+ROBOT_START_YAW=0.0 \
+bash scripts/tb3_stack.sh start
+```
+
+无界面运行时可以设置：
 
 ```bash
 TB3_NO_GUI=1 bash scripts/tb3_stack.sh start
@@ -84,9 +97,9 @@ bash scripts/tb3_stack.sh check
 - `/map_metadata`
 - `map -> odom` TF
 
-### 5. 键盘遥控机器人（新开一个终端）
+### 5. 键盘遥控机器人
 
-`start` 已拉起仿真与 SLAM，再开一个终端执行：
+先用 `tb3_stack.sh start` 拉起仿真和 SLAM，再开一个新终端执行：
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -94,27 +107,23 @@ export TURTLEBOT3_MODEL=burger
 ros2 run turtlebot3_teleop teleop_keyboard
 ```
 
-终端里会打印按键说明，常见为：
+常用按键：
 
-- **移动**：`w` 前进、`x` 后退、`a` / `d` 左转 / 右转
-- **停止**：`s` 或 `Space`
-- **调节线速度 / 角速度**：`q` `e` `z` `c` 等（以终端提示为准）
+- `w` 前进，`x` 后退，`a` / `d` 左转 / 右转
+- `s` 或空格停止
+- `q`、`e`、`z`、`c` 调整线速度和角速度
 
-让车动起来后，SLAM 才会持续收到新观测，**栅格地图**在 RViz 里会逐渐补全。
-
-### 6. 仅再开 RViz（可选）
-
-若已用 `start` 打开过 RViz，一般不必重复。若之前用 `TB3_NO_GUI=1` 启动或关闭了 RViz，可单独执行：
+### 6. 仅重新打开 RViz
 
 ```bash
 bash scripts/tb3_stack.sh rviz
 ```
 
-这个命令会自动：
+这个命令会：
 
-- 使用 WSL 更稳的软件渲染参数
-- 自动加载生成的 RViz 配置
-- 默认显示 `TF / LaserScan / Odometry / Map / RobotModel`
+- 使用更稳的 WSL 软件渲染参数
+- 自动加载当前 RViz 配置
+- 默认显示 `TF`、`LaserScan`、`Odometry`、`Map`、`RobotModel`
 
 ### 7. 停止运行栈
 
@@ -122,7 +131,7 @@ bash scripts/tb3_stack.sh rviz
 bash scripts/tb3_stack.sh stop
 ```
 
-会一并结束 `gzserver`、`gzclient`、`rviz2` 与 SLAM 等进程。
+会一起结束 `gzserver`、`gzclient`、`rviz2`、`slam_toolbox`、动态障碍控制器等相关进程。
 
 ## 日志
 
@@ -144,7 +153,7 @@ bash scripts/tb3_stack.sh logs all
 bash scripts/tb3_stack.sh logs gzserver
 ```
 
-查看 Gazebo 3D 客户端：
+查看 Gazebo 客户端：
 
 ```bash
 bash scripts/tb3_stack.sh logs gzclient
@@ -174,15 +183,35 @@ bash scripts/tb3_stack.sh logs slam
 bash scripts/tb3_stack.sh logs robot_description
 ```
 
-查看实体生成日志：
+查看机器人生成日志：
 
 ```bash
 bash scripts/tb3_stack.sh logs spawn
 ```
 
+查看动态障碍日志：
+
+```bash
+bash scripts/tb3_stack.sh logs obstacle
+```
+
+## 常用环境变量
+
+- `TB3_NO_GUI=1`
+- `RVIZ_CONFIG_FILE=<path>`
+- `WORLD_FILE=<path>`
+- `MAP_PGM_FILE=<path>`
+- `MAP_YAML_FILE=<path>`
+- `ROBOT_START_X=<value>`
+- `ROBOT_START_Y=<value>`
+- `ROBOT_START_Z=<value>`
+- `ROBOT_START_YAW=<value>`
+- `OBSTACLE_TRAJECTORY=[line|circle|figure8|lissajous|patrol]`
+- `OBSTACLE_FALLBACK_RATE_HZ=<value>`
+
 ## 手动检查命令
 
-如果你不想用 `tb3_stack.sh check`，也可以手动执行：
+如果不想用 `tb3_stack.sh check`，也可以手动执行：
 
 ```bash
 ros2 topic echo /scan --once
@@ -193,16 +222,14 @@ ros2 run tf2_ros tf2_echo map odom
 ## 常见问题
 
 - 没有 `/spawn_entity`
-  检查 `gzserver` 是否带了 `libgazebo_ros_factory.so`
-
+  检查 `gzserver` 是否正常启动并加载了 `gazebo_ros_factory`
 - 没有 `/tf_static`
   检查 `robot_state_publisher` 是否启动成功
-
 - 没有 `/robot_description`
   检查 `/tmp/tb3_stack/robot_description.log`
-
 - 没有 `map`
-  先确认 `/scan`、`/odom`、`/tf_static` 正常，再让机器人转几秒
-
-- RViz 里地图显示异常
-  这通常是 WSL 图形兼容问题，不代表后端建图失败。优先用 `tb3_stack.sh check` 和 `tf2_echo map odom` 判断系统状态。
+  先确认 `/scan`、`/odom`、`/tf_static` 正常，再让机器人移动起来
+- 动态障碍不动
+  先看 `bash scripts/tb3_stack.sh logs obstacle`
+- 机器人起点离动态障碍太近
+  启动时通过 `ROBOT_START_X/Y/Z/YAW` 调整出生点

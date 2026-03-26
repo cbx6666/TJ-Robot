@@ -25,6 +25,9 @@ ${SUDO} apt install -y \
   ros-humble-desktop \
   gazebo \
   python3-colcon-common-extensions \
+  ros-humble-rclpy \
+  ros-humble-geometry-msgs \
+  ros-humble-nav-msgs \
   ros-humble-gazebo-ros-pkgs \
   ros-humble-slam-toolbox \
   ros-humble-turtlebot3 \
@@ -64,6 +67,18 @@ for pkg in gazebo_ros slam_toolbox turtlebot3_gazebo turtlebot3_description nav2
     status=1
   fi
 done
+
+if python3 - <<'PY'
+import rclpy
+from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
+PY
+then
+  echo "OK   python imports rclpy geometry_msgs nav_msgs"
+else
+  echo "FAIL python imports rclpy geometry_msgs nav_msgs"
+  status=1
+fi
 
 echo "Environment setup complete"
 echo "Open a new shell or run: source /opt/ros/humble/setup.bash"
