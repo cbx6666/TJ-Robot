@@ -35,7 +35,9 @@ ${SUDO} apt install -y \
   ros-humble-turtlebot3-gazebo \
   ros-humble-navigation2 \
   ros-humble-nav2-bringup \
-  ros-humble-xacro
+  ros-humble-xacro \
+  ros-humble-depth-image-proc \
+  ros-humble-pointcloud-to-laserscan
 
 if ! grep -Fq "source /opt/ros/humble/setup.bash" "${HOME}/.bashrc"; then
   echo "source /opt/ros/humble/setup.bash" >> "${HOME}/.bashrc"
@@ -59,7 +61,7 @@ for cmd in ros2 rviz2 gzserver colcon; do
   fi
 done
 
-for pkg in gazebo_ros slam_toolbox turtlebot3_gazebo turtlebot3_description nav2_bringup xacro; do
+for pkg in gazebo_ros slam_toolbox turtlebot3_gazebo turtlebot3_description nav2_bringup xacro depth_image_proc pointcloud_to_laserscan; do
   if ros2 pkg prefix "${pkg}" >/dev/null 2>&1; then
     echo "OK   package ${pkg}"
   else
@@ -67,6 +69,12 @@ for pkg in gazebo_ros slam_toolbox turtlebot3_gazebo turtlebot3_description nav2
     status=1
   fi
 done
+
+if ros2 pkg prefix cartographer_ros >/dev/null 2>&1; then
+  echo "OK   optional cartographer_ros (SLAM_RGBD_BACKEND=cartographer)"
+else
+  echo "SKIP optional cartographer_ros — 需要时: sudo apt install ros-humble-cartographer ros-humble-cartographer-ros"
+fi
 
 if python3 - <<'PY'
 import rclpy

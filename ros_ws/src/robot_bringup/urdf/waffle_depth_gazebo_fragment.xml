@@ -1,0 +1,28 @@
+  <!--
+    深度挂在 camera_depth_frame，避免与 camera_rgb_frame 上已有 RGB Gazebo 插件同 link 叠两层导致 gzserver 崩溃。
+    独立 camera_name，话题见 rgbd_to_scan.launch.py 默认参数。
+  -->
+  <gazebo reference="camera_depth_frame">
+    <sensor type="depth" name="tb3_depth_sensor">
+      <always_on>true</always_on>
+      <update_rate>10.0</update_rate>
+      <visualize>false</visualize>
+      <camera name="tb3_depth_cam">
+        <horizontal_fov>1.085595</horizontal_fov>
+        <image>
+          <width>640</width>
+          <height>480</height>
+          <format>R8G8B8</format>
+        </image>
+        <clip>
+          <near>0.1</near>
+          <far>8.0</far>
+        </clip>
+      </camera>
+      <plugin filename="libgazebo_ros_camera.so" name="tb3_depth_only_plugin">
+        <ros></ros>
+        <camera_name>tb3_depth_only</camera_name>
+        <frame_name>camera_depth_optical_frame</frame_name>
+      </plugin>
+    </sensor>
+  </gazebo>

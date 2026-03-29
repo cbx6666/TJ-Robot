@@ -1,0 +1,2 @@
+# 权重体积大，默认不提交；需要入库可 force add
+models/*.pt

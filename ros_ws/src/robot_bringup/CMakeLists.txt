@@ -6,6 +6,11 @@ find_package(ament_cmake REQUIRED)
 install(DIRECTORY
   launch
   config
+  world
+  maps
+  models
+  scripts
+  urdf
   DESTINATION share/${PROJECT_NAME}
 )
 

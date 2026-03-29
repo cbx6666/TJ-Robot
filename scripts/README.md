@@ -1,4 +1,4 @@
-﻿# Scripts
+# Scripts
 
 这个目录负责环境安装、基础仿真拉起、运行检查、RViz 启动和日志查看。
 
@@ -52,9 +52,19 @@ bash scripts/tb3_stack.sh start
 - 持续发布 `/robot_description`
 - 生成 TurtleBot3 机器人
 - 生成动态障碍物并启动其控制器
-- 启动 `slam_toolbox`
+- 启动建图：**始终激光**（`slam_laser.launch.py`）。若已 `colcon build human_yolo_seg` 且 **`TB3_ASSIST_SCAN_FILTER=1`（默认）**：在 SLAM 前启动 **`scan_person_filter_node` + YOLO**，SLAM 订阅 **`/scan_filtered`**。**`TB3_ASSIST_SCAN_FILTER=0`** 时 SLAM 订阅 **`/scan`**。默认 **`TB3_STACK_MODE=laser`**（**burger** + 官方 `model.sdf`）；此时若 **`TB3_ASSIST_SCAN_FILTER=1` 且已 build `human_yolo_seg`**，会自动为 **burger 合并 URDF + 生成带 RGB 的 SDF**（与 waffle 相机同位姿），保证 **纯激光与 RGB+YOLO 辅助** 用**同一车型**。**`TB3_STACK_MODE=assist`**：未指定模型时默认 **waffle**（可注入深度）；若显式 **`TURTLEBOT3_MODEL=burger`**，则为 **burger + 仅 RGB**（无深度 SDF）。**`rgbd_to_scan` 默认关闭**，需 **`TB3_ASSIST_RGBD_BRIDGE=1`**。RViz 默认显示 **`/human_yolo/annotated_image`**，不再显示深度图。详见 `ros_ws/README`。日志含 `merge_burger_rgb.log`、`prepare_burger_rgb_sdf.log`（burger+RGB 时）。
 - 生成或加载 RViz 配置
 - 启动 `gzclient` 和 `rviz2`
+
+启动前请在 `ros_ws` 下执行过 `colcon build`，以便加载 `robot_bringup`。
+
+```bash
+bash scripts/tb3_stack.sh start
+TB3_STACK_MODE=assist bash scripts/tb3_stack.sh start   # 默认 waffle；深度桥另设 TB3_ASSIST_RGBD_BRIDGE=1
+TURTLEBOT3_MODEL=burger TB3_STACK_MODE=assist bash scripts/tb3_stack.sh start   # assist 但车体仍为 burger（仅 RGB）
+TB3_ASSIST_RGBD_BRIDGE=1 TB3_STACK_MODE=assist bash scripts/tb3_stack.sh start   # waffle assist 下再开 depth→/scan_rgbd
+TB3_ASSIST_SCAN_FILTER=0 bash scripts/tb3_stack.sh start   # 关闭 YOLO/scan 过滤，SLAM 只用 /scan
+```
 
 默认机器人出生点：
 
@@ -85,10 +95,12 @@ TB3_NO_GUI=1 bash scripts/tb3_stack.sh start
 bash scripts/tb3_stack.sh check
 ```
 
+`check` 校验 **`/scan`** 等与激光建图相关话题。若 **`TB3_ASSIST_SCAN_FILTER=1`（默认）**，会检查 **`/human_yolo/*`**、`/scan_filtered` 发布者（失败不退出，仅 WARN）。若 **`TB3_STACK_MODE=assist`** 且 **`TB3_ASSIST_RGBD_BRIDGE=1`**，再检查深度与 **`/scan_rgbd`**。
+
 检查内容包括：
 
 - `/clock`
-- `/scan`
+- `/scan`（一键栈固定激光建图）
 - `/odom`
 - `/tf`
 - `/tf_static`
@@ -171,7 +183,7 @@ bash scripts/tb3_stack.sh logs rviz
 bash scripts/tb3_stack.sh logs rsp
 ```
 
-查看 `slam_toolbox`：
+查看 SLAM 日志（slam_toolbox 或 Cartographer）：
 
 ```bash
 bash scripts/tb3_stack.sh logs slam
@@ -195,8 +207,21 @@ bash scripts/tb3_stack.sh logs spawn
 bash scripts/tb3_stack.sh logs obstacle
 ```
 
+RGB 掩膜 / assist 深度：
+
+```bash
+bash scripts/tb3_stack.sh logs scan_filter
+bash scripts/tb3_stack.sh logs yolo
+bash scripts/tb3_stack.sh logs rgbd
+```
+
 ## 常用环境变量
 
+- `TB3_STACK_MODE=laser|assist`（`assist` 可配合 `TURTLEBOT3_MODEL=burger` 保持 burger 车体 + RGB）
+- `TB3_ASSIST_SCAN_FILTER=0|1`（默认 1：YOLO + `/scan_filtered` 建图，需已 build `human_yolo_seg`）
+- `TB3_ASSIST_RGBD_BRIDGE=0|1`（默认 0；仅 assist 时起 `rgbd_to_scan`）
+- `YOLO_CAMERA_INFO_TOPIC=/camera/camera_info`
+- `YOLO_DEVICE=auto|cpu|cuda:0`（默认 `auto` 有 CUDA 则用 GPU，见 `ros_ws/README`）
 - `TB3_NO_GUI=1`
 - `RVIZ_CONFIG_FILE=<path>`
 - `WORLD_FILE=<path>`
@@ -208,6 +233,24 @@ bash scripts/tb3_stack.sh logs obstacle
 - `ROBOT_START_YAW=<value>`
 - `OBSTACLE_TRAJECTORY=[line|circle|figure8|lissajous|patrol]`
 - `OBSTACLE_FALLBACK_RATE_HZ=<value>`
+- `TB3_WAIT_POLL_SEC`（默认 `0.5`）：`tb3_stack.sh` 里等待 Gazebo 服务、`/tf_static`、`/map` 时每次探测的间隔；原为 1s，略缩短可少等几秒（仍受下面因素影响）
+
+### 启动偏慢时先看这些
+
+1. **WSL2 + 工程在 `/mnt/e/...`（Windows 盘）**  
+   跨文件系统访问 NTFS/exFAT 时 **元数据与小文件 I/O 明显慢于 Linux 家目录（ext4）**。`colcon build`、`python3` 读大量小文件、Gazebo 读 `WORLD_FILE` 与模型若路径在 E 盘，都会拖慢。建议：把 **`ros_ws` 克隆到 `~/tj_ws` 一类纯 Linux 路径** 再编译运行；至少把 **日志与临时 URDF** 留在默认 **`TB3_LOG_DIR=/tmp/tb3_stack`**（已在 `/tmp`，不跟盘符走）。
+
+2. **脚本里固定的等待链**（无法完全省掉）  
+   `wait_for_service /spawn_entity`（最长约 20s）、`wait_for_topic /tf_static`（15s）、动态障碍的 `set_entity_state`（20s）、`wait_for_topic /map`（25s）。每一步都会周期性执行 **`ros2 service/topic list`**，每次子进程 + DDS 初始化在 WSL 上也不便宜。已把轮询从 **1s 改为默认 0.5s**（`TB3_WAIT_POLL_SEC`），就绪后能更快进入下一步。
+
+3. **Gazebo + 软件渲染**  
+   默认 `LIBGL_ALWAYS_SOFTWARE=1`（WSL 兼容）会拖慢 **gzserver** 首帧与加载。
+
+4. **YOLO + PyTorch**  
+   若 `TB3_ASSIST_SCAN_FILTER=1`，每次启动会加载权重、首次推理冷启动；**CPU** 上尤其明显。不需要时可 `TB3_ASSIST_SCAN_FILTER=0` 对比启动时间。
+
+5. **杀毒 / Windows Defender**  
+   实时扫描挂载盘上的文件有时会放大 WSL 侧延迟。
 
 ## 手动检查命令
 

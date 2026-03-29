@@ -1,0 +1,9 @@
+# pip install -r requirements.txt（与 ros2 同一 python3）
+# YOLO26 等较新权重若加载报错，请先：pip install -U ultralytics torch torchvision
+# NumPy 必须 <2：ROS 2 Humble 自带 cv_bridge 按 NumPy 1.x 编译，NumPy 2.x 会报 _ARRAY_API / AttributeError
+# OpenCV 4.12+ 的 wheel 会拉 numpy>=2；4.10.0.84 对 py3.10 仅要求 numpy>=1.21.2，可与 numpy 1.26 并存
+ultralytics>=8.3.200
+torch>=2.1.0
+torchvision>=0.16.0
+opencv-python-headless==4.10.0.84
+numpy>=1.23.0,<2
