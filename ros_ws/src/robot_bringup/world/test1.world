@@ -330,73 +330,7 @@
         <kinematic>0</kinematic>
       </link>
     </model>
-    <state world_name='default'>
-      <sim_time>1284 43000000</sim_time>
-      <real_time>1378 460940949</real_time>
-      <wall_time>1774340974 455723209</wall_time>
-      <iterations>1284043</iterations>
-      <model name='ground_plane'>
-        <pose>0 0 0 0 -0 0</pose>
-        <scale>1 1 1</scale>
-        <link name='link'>
-          <pose>0 0 0 0 -0 0</pose>
-          <velocity>0 0 0 0 -0 0</velocity>
-          <acceleration>0 0 0 0 -0 0</acceleration>
-          <wrench>0 0 0 0 -0 0</wrench>
-        </link>
-      </model>
-      <model name='unit_cylinder'>
-        <pose>4.19153 -4.58053 0.499997 2e-06 -0 0</pose>
-        <scale>1 1 1</scale>
-        <link name='link'>
-          <pose>4.19153 -4.58053 0.499997 2e-06 -0 0</pose>
-          <velocity>0.000139 -0.00087 -0.003499 0.001741 0.000278 0</velocity>
-          <acceleration>0 0 -9.8 0 -0 0</acceleration>
-          <wrench>0 0 -9.8 0 -0 0</wrench>
-        </link>
-      </model>
-      <model name='unit_sphere'>
-        <pose>3.92728 3.96396 0.5 0 -0 0</pose>
-        <scale>1 1 1</scale>
-        <link name='link'>
-          <pose>3.92728 3.96396 0.5 0 -0 0</pose>
-          <velocity>0 0 0 0 -0 0</velocity>
-          <acceleration>0 0 0 0 -0 0</acceleration>
-          <wrench>0 0 0 0 -0 0</wrench>
-        </link>
-      </model>
-      <model name='walls'>
-        <pose>-0.86907 0.52028 0 0 -0 0</pose>
-        <scale>1 1 1</scale>
-        <link name='Wall_0'>
-          <pose>-0.86572 -6.94945 0 0 -0 0</pose>
-          <velocity>0 0 0 0 -0 0</velocity>
-          <acceleration>0 0 0 0 -0 0</acceleration>
-          <wrench>0 0 0 0 -0 0</wrench>
-        </link>
-        <link name='Wall_1'>
-          <pose>6.5527 0.499887 0 0 -0 1.57168</pose>
-          <velocity>0 0 0 0 -0 0</velocity>
-          <acceleration>0 0 0 0 -0 0</acceleration>
-          <wrench>0 0 0 0 -0 0</wrench>
-        </link>
-        <link name='Wall_3'>
-          <pose>-0.869037 7.94922 0 0 -0 0</pose>
-          <velocity>0 0 0 0 -0 0</velocity>
-          <acceleration>0 0 0 0 -0 0</acceleration>
-          <wrench>0 0 0 0 -0 0</wrench>
-        </link>
-        <link name='Wall_5'>
-          <pose>-8.31841 0.540674 0 0 0 -1.56991</pose>
-          <velocity>0 0 0 0 -0 0</velocity>
-          <acceleration>0 0 0 0 -0 0</acceleration>
-          <wrench>0 0 0 0 -0 0</wrench>
-        </link>
-      </model>
-      <light name='sun'>
-        <pose>0 0 10 0 -0 0</pose>
-      </light>
-    </state>
+
     <model name='unit_sphere'>
       <pose>3.92728 3.96396 0.5 0 -0 0</pose>
       <link name='link'>
@@ -452,10 +386,115 @@
     </model>
     <gui fullscreen='0'>
       <camera name='user_camera'>
-        <pose>-8.07332 22.345 26.8883 0 0.893713 -1.49112</pose>
+        <pose>-7.31183 12.6082 12.4332 0 0.893713 -1.49112</pose>
         <view_controller>orbit</view_controller>
         <projection_type>perspective</projection_type>
       </camera>
     </gui>
+
+    <actor name="person_walking">
+      <pose>3.0 3.0 1.0 0 0 0</pose>
+      
+      <skin>
+        <filename>model://person_walking/meshes/walking.dae</filename>
+        <scale>1.0</scale>
+      </skin>
+      
+      <animation name="walking">
+        <filename>model://person_walking/meshes/walking.dae</filename>        
+        <interpolate_x>true</interpolate_x>
+      </animation>
+      
+      <script>
+        <loop>true</loop>
+        <auto_start>true</auto_start>
+        <trajectory id="0" type="walking">
+          <waypoint>
+            <time>0.0</time>
+            <pose>3.0 3.0 1.0 0 0 0</pose>
+          </waypoint>
+          <waypoint>
+            <time>10.0</time>
+            <pose>10.0 3.0 1.0 0 0 0</pose>
+          </waypoint>
+          <waypoint>
+            <time>20.0</time>
+            <pose>3.0 3.0 1.0 0 0 0</pose>
+          </waypoint>
+        </trajectory>
+      </script>
+    </actor>
+
+
+    <model name='person_standing'>
+      <link name='link'>
+        <inertial>
+          <pose>0 -0.1 0.95 0 -0 0</pose>
+          <mass>80</mass>
+          <inertia>
+            <ixx>24.88</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>25.73</iyy>
+            <iyz>0</iyz>
+            <izz>2.48</izz>
+          </inertia>
+        </inertial>
+        <collision name='bottom'>
+          <pose>0 -0.1 0.01 0 -0 0</pose>
+          <geometry>
+            <box>
+              <size>0.5 0.35 0.02</size>
+            </box>
+          </geometry>
+          <max_contacts>10</max_contacts>
+          <surface>
+            <contact>
+              <ode/>
+            </contact>
+            <bounce/>
+            <friction>
+              <torsional>
+                <ode/>
+              </torsional>
+              <ode/>
+            </friction>
+          </surface>
+        </collision>
+        <collision name='person'>
+          <pose>0 0 0.02 0.04 -0 0</pose>
+          <geometry>
+            <mesh>
+              <uri>model://person_standing/meshes/standing.dae</uri>
+            </mesh>
+          </geometry>
+          <max_contacts>10</max_contacts>
+          <surface>
+            <contact>
+              <ode/>
+            </contact>
+            <bounce/>
+            <friction>
+              <torsional>
+                <ode/>
+              </torsional>
+              <ode/>
+            </friction>
+          </surface>
+        </collision>
+        <visual name='visual'>
+          <pose>0 0 0.02 0.04 -0 0</pose>
+          <geometry>
+            <mesh>
+              <uri>model://person_standing/meshes/standing.dae</uri>
+            </mesh>
+          </geometry>
+        </visual>
+        <self_collide>0</self_collide>
+        <enable_wind>0</enable_wind>
+        <kinematic>0</kinematic>
+      </link>
+      <pose>-5.90195 5.06882 0 0 -0 0</pose>
+    </model>
   </world>
 </sdf>
