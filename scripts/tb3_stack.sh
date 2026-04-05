@@ -59,6 +59,19 @@ fi
 
 export GAZEBO_MODEL_DATABASE_URI="${GAZEBO_MODEL_DATABASE_URI:-}"
 export GAZEBO_MODEL_PATH="${GAZEBO_MODEL_PATH:-/usr/share/gazebo-11/models:/opt/ros/humble/share/turtlebot3_gazebo/models:/opt/ros/humble/share/turtlebot3_description}"
+# moving_obstacle.sdf 使用 model://person_standing（Gazebo 经典人形，非 TB3 自带）。把用户/本包 models 目录放在路径前，便于 ~/.gazebo/models 或 robot_bringup/models/person_standing 生效。
+_BR_MODELS_INSTALL=""
+if command -v ros2 >/dev/null 2>&1; then
+  if _rbp="$(ros2 pkg prefix robot_bringup 2>/dev/null)" && [[ -n "${_rbp}" ]]; then
+    _BR_MODELS_INSTALL="${_rbp}/share/robot_bringup/models"
+  fi
+fi
+_BR_MODELS_SRC="${SCRIPT_DIR}/../ros_ws/src/robot_bringup/models"
+for _gz_models_prepend in "${_BR_MODELS_SRC}" "${_BR_MODELS_INSTALL}" "${HOME}/.gazebo/models"; do
+  if [[ -d "${_gz_models_prepend}" ]]; then
+    export GAZEBO_MODEL_PATH="${_gz_models_prepend}:${GAZEBO_MODEL_PATH}"
+  fi
+done
 # Gazebo Classic 必须先包含系统 share（media/shaders），否则 RTShaderSystem / RenderEngine 初始化失败、gzserver 断言崩溃
 TB3_DESC_PREFIX="$(ros2 pkg prefix turtlebot3_description 2>/dev/null)/share"
 GZ_RES_USER="${GAZEBO_RESOURCE_PATH:-}"
