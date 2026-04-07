@@ -1,4 +1,4 @@
-from setuptools import setup
+﻿from setuptools import setup
 
 package_name = "robot_navigation"
 
@@ -18,6 +18,7 @@ setup(
     entry_points={
         "console_scripts": [
             "point_to_point = robot_navigation.point_to_point:main",
+            "coverage_patrol = robot_navigation.coverage_patrol:main",
         ],
     },
 )

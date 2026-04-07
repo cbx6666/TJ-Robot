@@ -1,168 +1,83 @@
-# Indoor Service Robot Simulation
+﻿# Indoor Service Robot Simulation
 
-基于 ROS 2 Humble、Gazebo、TurtleBot3、SLAM Toolbox 与 Nav2 的室内服务机器人仿真项目。
+这是一个基于 ROS 2 Humble、Gazebo 和 TurtleBot3 的室内机器人仿真项目。
+当前仓库的主运行路径已经固定为：`assist + waffle + YOLO + coverage_patrol`。
 
-## 项目简介
+## 当前主方案
 
-本项目面向室内服务机器人应用场景，目标是构建一套具备环境感知、地图构建、自主导航、任务调度与后续功能扩展能力的仿真系统。项目以 ROS 2 为系统集成基础，以 Gazebo 为仿真平台，以 TurtleBot3 为移动机器人基线模型，在统一的软件架构下逐步完成从底层运行环境到上层任务逻辑的建设。
+- `tb3_stack.sh` 负责拉起 Gazebo、SLAM、RViz、YOLO 和激光过滤链路
+- `slam_toolbox` 在启用 YOLO 时订阅 `/scan_filtered` 建图
+- `coverage_patrol` 负责按固定覆盖路线扫描房间
+- `coverage_patrol` 继续订阅原始 `/scan` 做近距离避障，不使用 `/scan_filtered`
+- `point_to_point` 只保留为单目标点运动调试工具
 
-项目整体强调三点：
+## 当前功能
 
-- 稳定性：先建立可靠、可复现的基础运行环境
-- 可扩展性：为导航、任务系统、接口设计预留清晰结构
-- 工程性：以工作区、脚本、模块分层的方式组织项目
-
-## 项目目标
-
-本项目的总体目标不是单纯完成某一个仿真演示，而是建立一套可持续扩展的室内服务机器人研发基础。围绕这一目标，项目分阶段推进以下能力：
-
-- 室内环境仿真
-  在 Gazebo 中构建机器人与室内场景的基础运行环境
-
-- 地图构建与定位基础
-  基于激光雷达与 SLAM Toolbox 完成地图构建与坐标系链路建立
-
-- 自主导航能力
-  基于 Nav2 完成目标点导航、路径规划与避障能力接入
-
-- 任务级控制
-  在导航能力之上构建任务流程、任务状态管理与调度逻辑
-
-- 接口与扩展能力
-  预留自定义消息、服务、动作接口，为后续接入语音、视觉、抓取或任务理解模块提供基础
-
-## 应用场景
-
-本项目以室内服务机器人为原型，适合扩展到以下场景：
-
-- 室内巡检与路径验证
-- 房间间导航与目标点到达
-- 基于任务流程的移动执行
-- 多模块联调前的仿真验证
-
-在当前阶段，项目重点覆盖室内移动、建图、导航和任务编排基础，不直接等同于完整的移动操作机器人系统。若未来扩展到抓取、搬运或复杂人机交互，需要在现有基础上继续接入操作模块、感知模块和更高层逻辑。
-
-## 系统设计
-
-项目采用分层设计，便于理解系统结构，也便于后续团队分工与迭代。
-
-### 1. 环境与运行层
-
-这一层负责系统的基础运行条件，包括：
-
-- ROS 2 Humble 运行环境
-- Gazebo 仿真后端
-- TurtleBot3 模型与传感器资源
-- RViz 基础可视化
-- 脚本化安装、启动、检查与日志管理
-
-这一层解决的是“系统是否能够稳定启动、稳定检查、稳定复现”的问题。
-
-### 2. 基础能力层
-
-这一层负责机器人仿真的核心能力，包括：
-
-- 传感器数据接入
-- TF 与坐标变换链路建立
-- 地图构建
-- 室内移动基础
-
-这一层解决的是“机器人是否具备感知环境、理解自身位姿并在环境中移动”的问题。
-
-### 3. 功能开发层
-
-这一层承载后续自定义开发内容，包括：
-
-- 系统启动编排
-- 导航逻辑封装
-- 任务状态管理
-- 任务执行流程
-- 自定义接口设计
-
-这一层解决的是“如何基于已有基础能力组织出完整的机器人任务行为”的问题。
-
-## 机器人选型
-
-当前项目以 `TurtleBot3 Burger` 作为基线机器人模型。
-
-选择这一模型的原因包括：
-
-- ROS 2 Humble 生态成熟，资料和示例充分
-- Gazebo、RViz、SLAM、Nav2 的对接路径清晰
-- 模型轻量，便于优先完成基础链路验证
-- 足以支撑室内建图、导航与任务系统的前期开发
-
-需要说明的是，`TurtleBot3 Burger` 更适合作为移动导航平台，用于验证地图、定位、路径规划和任务流程。对于抓取、搬运等“操作型任务”，当前模型并不直接具备机械臂与夹爪能力，若项目后续扩展到“寻找并拿取物品”，仍需进一步引入操作模块或更换机器人形态。
-
-## 技术路线
-
-项目当前的核心技术路线如下：
-
-- ROS 2 Humble
-  作为系统通信、节点管理与功能集成基础
-
-- Gazebo
-  作为室内机器人仿真平台，承担环境和传感器仿真
-
-- TurtleBot3
-  作为移动机器人基线模型
-
-- SLAM Toolbox
-  用于地图构建与基础定位链路建立
-
-- Nav2
-  用于后续导航、路径规划与控制能力扩展
-
-- RViz
-  用于 TF、传感器、机器人模型与地图信息可视化
+- TurtleBot3 室内仿真
+- 激光建图 `slam_toolbox`
+- 动态障碍物与人形模型
+- YOLO 人体检测与 `/scan_filtered`
+- 自动覆盖巡航扫描 `coverage_patrol`
+- 简单点到点控制 `point_to_point`
 
 ## 仓库结构
 
 ```text
 .
-├─ scripts/   环境安装、运行控制、检查与日志相关脚本
-├─ ros_ws/    ROS 2 开发工作区
-└─ README.md  项目设计与总体说明
+|- scripts/                     环境安装和一键启动脚本
+|- ros_ws/                      ROS 2 工作区
+|  |- src/robot_bringup         launch、地图、world、辅助脚本
+|  |- src/robot_navigation      运动控制与覆盖巡航节点
+|  |- src/human_yolo_seg        YOLO 人体检测和激光过滤
+|  |- src/robot_interfaces      预留接口定义
+|  `- src/robot_tasks           预留任务层
+`- README.md
 ```
 
-其中：
+## 推荐启动方式
 
-- [`scripts/`](scripts/README.md)
-  负责基础环境配置与系统运行说明
+先准备环境：
 
-- [`ros_ws/`](ros_ws/README.md)
-  负责承载后续 ROS 2 工作区与功能开发说明
+```bash
+cd /mnt/d/Homework/robot
+bash scripts/setup_env.sh
+```
 
-## 开发工作区规划
+编译工作区：
 
-后续开发统一放在 `ros_ws/src` 下。当前预建的包包括：
+```bash
+cd /mnt/d/Homework/robot/ros_ws
+source /opt/ros/humble/setup.bash
+colcon build
+source install/setup.bash
+```
 
-- `robot_bringup`
-  用于系统启动入口、launch 文件与参数编排
+启动带 YOLO 的主栈：
 
-- `robot_navigation`
-  用于导航逻辑、目标点控制与导航封装
+```bash
+cd /mnt/d/Homework/robot
+TB3_STACK_MODE=assist TURTLEBOT3_MODEL=waffle TB3_ASSIST_SCAN_FILTER=1 bash scripts/tb3_stack.sh start
+```
 
-- `robot_tasks`
-  用于任务流程、任务状态管理与上层调度逻辑
+新开终端启动自动覆盖巡航：
 
-- `robot_interfaces`
-  用于自定义消息、服务与动作接口
+```bash
+cd /mnt/d/Homework/robot/ros_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 run robot_navigation coverage_patrol
+```
 
-这样的结构设计有助于保持系统边界清晰，避免环境脚本、仿真逻辑与业务逻辑混杂在一起。
+## 维护说明
 
-## 项目阶段规划
+- 当前主方案是 `coverage_patrol + YOLO + /scan_filtered`
+- `coverage_patrol` 保留原始 `/scan` 只用于近距离避障
+- `point_to_point` 仅用于手动调试运动控制
+- `robot_tasks` 和 `robot_interfaces` 仍然是占位包
+- 每次修改 `ros_ws/src` 下的代码后，都需要重新执行 `colcon build`
 
-建议将项目推进划分为以下阶段：
+更多细节见：
 
-1. 基础环境与仿真地基阶段
-   完成环境配置、仿真启动、建图链路打通与可视化验证
-
-2. 导航能力接入阶段
-   将 Nav2 接入现有系统，完成室内目标点导航能力
-
-3. 任务系统阶段
-   在导航能力基础上构建任务状态机、任务流程与执行接口
-
-4. 扩展能力阶段
-   根据项目目标继续接入视觉、交互、操作或任务理解模块
+- [scripts/README.md](scripts/README.md)
+- [ros_ws/README.md](ros_ws/README.md)
+- [ros_ws/src/robot_navigation/robot_navigation/README.md](ros_ws/src/robot_navigation/robot_navigation/README.md)
