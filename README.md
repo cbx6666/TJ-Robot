@@ -31,16 +31,19 @@
 ## 仓库结构
 
 ```text
+docs/                    代码与功能总索引（新人按图索骥）
 scripts/                 环境安装、tb3_stack 一键栈
-任务单/                  阶段任务与实验报告（如对照建图实验说明）
-saved_maps/              可自行存放导出的地图
+任务单/                  阶段任务、实验报告与原理说明
+saved_maps/              可自行存放导出的地图（大文件默认 .gitignore）
 ros_ws/src/
-  robot_bringup/         launch、world、地图、配置
-  robot_navigation/      运动与覆盖巡航
-  human_yolo_seg/        YOLO 与人物–激光链
+  robot_bringup/         launch、world、地图、配置（见包内 README）
+  robot_navigation/      运动与覆盖巡航（节点说明见 robot_navigation/README.md）
+  human_yolo_seg/        YOLO 与人物–激光链（见包内 README）
   robot_interfaces/      预留
   robot_tasks/           预留
 ```
+
+**功能 → 源码路径** 总表：**[docs/代码与功能索引.md](docs/代码与功能索引.md)**
 
 ## 快速开始
 
@@ -82,6 +85,8 @@ ros2 run robot_navigation coverage_patrol
 更多环境变量与日志：**[scripts/README.md](scripts/README.md)**  
 工作区与包说明：**[ros_ws/README.md](ros_ws/README.md)**  
 覆盖巡航、存图、Nav2：**[ros_ws/src/robot_navigation/robot_navigation/README.md](ros_ws/src/robot_navigation/robot_navigation/README.md)**  
-对照建图实验（思路与步骤）：**[任务单/实验报告_AI语义识别剔除动态障碍物建图对照.md](任务单/实验报告_AI语义识别剔除动态障碍物建图对照.md)**
+对照建图实验（思路与步骤）：**[任务单/实验报告_AI语义识别剔除动态障碍物建图对照.md](任务单/实验报告_AI语义识别剔除动态障碍物建图对照.md)**  
+体系原理（建图、导航、识人、去人）：**[任务单/实验原理_建图导航与语义去人.md](任务单/实验原理_建图导航与语义去人.md)**  
+代码路径总索引：**[docs/代码与功能索引.md](docs/代码与功能索引.md)**
 
 修改 `ros_ws/src` 后需重新 **`colcon build`**（或按需 `--packages-select`）。

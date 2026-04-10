@@ -2,15 +2,17 @@
 
 所有功能包在 **`src/`** 下；改代码后需 **`colcon build`** 再 `source install/setup.bash`。
 
+**全仓库「功能 → 路径」总索引**（含脚本与任务单）：**[../docs/代码与功能索引.md](../docs/代码与功能索引.md)**
+
 ## 包一览
 
-| 包 | 内容 |
-|----|------|
-| **robot_bringup** | Launch、world、地图、mapper 参数、辅助脚本 |
-| **robot_navigation** | `point_to_point`、`coverage_patrol`、Nav2 覆盖等 |
-| **human_yolo_seg** | YOLO-Seg、人物方位角、`yolo_person_seg.launch.py`（strip/filter；可选 scan→map 彩色点云，launch 默认关） |
-| **robot_interfaces** | 预留消息 |
-| **robot_tasks** | 预留 |
+| 包 | 内容 | 包内说明 |
+|----|------|----------|
+| **robot_bringup** | Launch、world、地图、mapper 参数、辅助脚本 | [robot_bringup/README.md](src/robot_bringup/README.md) |
+| **robot_navigation** | `point_to_point`、`coverage_patrol`、Nav2 覆盖等 | [robot_navigation/README.md](src/robot_navigation/robot_navigation/README.md) |
+| **human_yolo_seg** | YOLO-Seg、人物方位角、strip/filter、清障 CLI | [human_yolo_seg/README.md](src/human_yolo_seg/README.md) |
+| **robot_interfaces** | 预留消息 | — |
+| **robot_tasks** | 预留 | — |
 
 ## 编译
 
