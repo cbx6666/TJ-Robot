@@ -1,7 +1,6 @@
 ﻿"""Minimal point-to-point controller for manual motion experiments."""
 
 import math
-from dataclasses import dataclass
 from typing import Optional
 
 import rclpy
@@ -9,24 +8,7 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 
-
-def clamp(value: float, low: float, high: float) -> float:
-    return max(low, min(high, value))
-
-
-def normalize_angle(angle: float) -> float:
-    return math.atan2(math.sin(angle), math.cos(angle))
-
-
-def yaw_from_quaternion(z: float, w: float) -> float:
-    return 2.0 * math.atan2(z, w)
-
-
-@dataclass
-class Pose2D:
-    x: float
-    y: float
-    yaw: float
+from robot_navigation.nav_math import Pose2D, clamp, normalize_angle, yaw_from_quaternion
 
 
 class PointToPointController(Node):
@@ -40,7 +22,7 @@ class PointToPointController(Node):
         self.declare_parameter('goal_yaw', 0.0)
         self.declare_parameter('use_goal_yaw', False)
         self.declare_parameter('control_rate_hz', 20.0)
-        self.declare_parameter('linear_speed_limit', 0.22)
+        self.declare_parameter('linear_speed_limit', 0.44)
         self.declare_parameter('angular_speed_limit', 1.2)
         self.declare_parameter('linear_kp', 0.8)
         self.declare_parameter('angular_kp', 2.5)

@@ -19,6 +19,8 @@ setup(
         "console_scripts": [
             "point_to_point = robot_navigation.point_to_point:main",
             "coverage_patrol = robot_navigation.coverage_patrol:main",
+            "coverage_patrol_nav2 = robot_navigation.coverage_patrol_nav2:main",
+            "wall_follow_coverage = robot_navigation.wall_follow_coverage:main",
         ],
     },
 )

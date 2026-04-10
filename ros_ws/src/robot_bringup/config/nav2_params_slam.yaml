@@ -1,0 +1,154 @@
+# Minimal-ish Nav2 params for SLAM mapping use (map from slam_toolbox).
+# Costmaps consume raw /scan for obstacle avoidance.
+
+amcl:
+  ros__parameters:
+    use_sim_time: true
+
+bt_navigator:
+  ros__parameters:
+    use_sim_time: true
+    global_frame: map
+    robot_base_frame: base_footprint
+    odom_topic: /odom
+    bt_loop_duration: 10
+    default_server_timeout: 20
+
+controller_server:
+  ros__parameters:
+    use_sim_time: true
+    controller_frequency: 15.0
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.001
+    min_theta_velocity_threshold: 0.001
+    failure_tolerance: 0.3
+    progress_checker_plugins: ["progress_checker"]
+    goal_checker_plugins: ["goal_checker"]
+    controller_plugins: ["FollowPath"]
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.35
+      movement_time_allowance: 10.0
+
+    goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      # 覆盖巡航以“到点”为主，航向放宽，减少在目标点附近原地扭动
+      xy_goal_tolerance: 0.35
+      yaw_goal_tolerance: 1.2
+      stateful: true
+
+    FollowPath:
+      plugin: "dwb_core::DWBLocalPlanner"
+      debug_trajectory_details: false
+      min_vel_x: 0.0
+      max_vel_x: 0.56
+      min_vel_theta: -2.0
+      max_vel_theta: 2.0
+      acc_lim_x: 2.4
+      acc_lim_theta: 4.8
+      decel_lim_x: -2.4
+      decel_lim_theta: -4.8
+      vx_samples: 20
+      vtheta_samples: 40
+      sim_time: 1.6
+      linear_granularity: 0.05
+      angular_granularity: 0.025
+      transform_tolerance: 0.2
+      xy_goal_tolerance: 0.35
+      trans_stopped_velocity: 0.08
+      short_circuit_trajectory_evaluation: true
+      critics: ["ObstacleFootprint", "Oscillation", "PathAlign", "GoalAlign", "PathDist", "GoalDist"]
+      ObstacleFootprint.scale: 0.02
+      # 降低“对齐路径/朝向”的侵略性，减轻原地来回摆
+      PathAlign.scale: 14.0
+      GoalAlign.scale: 10.0
+      PathDist.scale: 28.0
+      GoalDist.scale: 18.0
+      Oscillation.scale: 28.0
+
+planner_server:
+  ros__parameters:
+    use_sim_time: true
+    expected_planner_frequency: 2.0
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_navfn_planner/NavfnPlanner"
+      tolerance: 0.5
+      use_astar: false
+      allow_unknown: true
+
+behavior_server:
+  ros__parameters:
+    use_sim_time: true
+    costmap_topic: local_costmap/costmap_raw
+    footprint_topic: local_costmap/published_footprint
+    behavior_plugins: ["spin", "backup", "drive_on_heading", "wait"]
+    spin:
+      plugin: "nav2_behaviors/Spin"
+    backup:
+      plugin: "nav2_behaviors/BackUp"
+    drive_on_heading:
+      plugin: "nav2_behaviors/DriveOnHeading"
+    wait:
+      plugin: "nav2_behaviors/Wait"
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: true
+      global_frame: odom
+      robot_base_frame: base_footprint
+      update_frequency: 10.0
+      publish_frequency: 5.0
+      rolling_window: true
+      width: 6
+      height: 6
+      resolution: 0.05
+      robot_radius: 0.18
+      plugins: ["obstacle_layer", "inflation_layer"]
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: true
+          marking: true
+          data_type: "LaserScan"
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.55
+        cost_scaling_factor: 3.0
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      use_sim_time: true
+      global_frame: map
+      robot_base_frame: base_footprint
+      update_frequency: 4.0
+      publish_frequency: 2.0
+      rolling_window: true
+      width: 12
+      height: 12
+      resolution: 0.05
+      robot_radius: 0.18
+      track_unknown_space: true
+      # 边建图边导航时，/map 早期可能不覆盖机器人初始位置（尤其 Gazebo 世界坐标为负时）。
+      # 使用 rolling window 的 global_costmap，避免 "Robot is out of bounds of the costmap"。
+      plugins: ["obstacle_layer", "inflation_layer"]
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: true
+          marking: true
+          data_type: "LaserScan"
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.65
+        cost_scaling_factor: 3.0
+

@@ -1,19 +1,26 @@
 #!/usr/bin/env python3
-"""在官方 turtlebot3_burger 的 model.sdf 上增加与 waffle 等价的 RGB 相机（/camera/image_raw 等）。
+"""在官方 turtlebot3_burger 的 model.sdf 上增加前向 RGB（/camera/image_raw 等）。
 
-用于 burger + YOLO + 激光建图，车体仍为 burger，仅多一个 camera_rgb_frame（与 URDF fragment 位姿一致）。
+车体仍为 burger，仅多一个 camera_rgb_frame（与 URDF fragment 位姿一致）。
+水平视场角默认约 135°（较原 TB3 ~62° 更宽，又比接近 180° 的透视畸变更温和）。
 """
 from __future__ import annotations
 
 import argparse
+import math
 import shutil
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+# 与 Gazebo 中 TurtleBot3 LDS（base_scan）量程上限一致，RGB 远裁剪与之对齐可略减无效远景渲染
+TB3_LASER_RANGE_MAX_M = 3.5
+RGB_HORIZONTAL_FOV_RAD = math.radians(135.0)
+
 
 def _rgb_link_and_joint() -> tuple[ET.Element, ET.Element]:
-    link_xml = """
+    hfov = f"{RGB_HORIZONTAL_FOV_RAD:.6f}"
+    link_xml = f"""
 <link name="camera_rgb_frame">
   <collision name="collision">
     <pose>0 0 0 0 0 0</pose>
@@ -47,7 +54,7 @@ def _rgb_link_and_joint() -> tuple[ET.Element, ET.Element]:
     <always_on>true</always_on>
     <update_rate>30</update_rate>
     <camera name="camera_rgb">
-      <horizontal_fov>1.085595</horizontal_fov>
+      <horizontal_fov>{hfov}</horizontal_fov>
       <image>
         <width>640</width>
         <height>480</height>
@@ -55,7 +62,7 @@ def _rgb_link_and_joint() -> tuple[ET.Element, ET.Element]:
       </image>
       <clip>
         <near>0.05</near>
-        <far>12.0</far>
+        <far>{TB3_LASER_RANGE_MAX_M}</far>
       </clip>
     </camera>
     <plugin name="camera_rgb_controller" filename="libgazebo_ros_camera.so">
@@ -77,7 +84,7 @@ def _rgb_link_and_joint() -> tuple[ET.Element, ET.Element]:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="为 burger 生成带 RGB 的 model.sdf")
+    p = argparse.ArgumentParser(description="为 burger 生成带前向 RGB（约 135° HFOV）的 model.sdf")
     p.add_argument("src_sdf", type=Path, help="系统 turtlebot3_burger/model.sdf")
     p.add_argument("dst_sdf", type=Path, help="输出路径")
     args = p.parse_args()
@@ -115,7 +122,7 @@ def main() -> int:
 
     args.dst_sdf.parent.mkdir(parents=True, exist_ok=True)
     tree.write(args.dst_sdf, encoding="utf-8", xml_declaration=False)
-    print(f"Wrote {args.dst_sdf}")
+    print(f"Wrote {args.dst_sdf} (RGB HFOV ≈ {math.degrees(RGB_HORIZONTAL_FOV_RAD):.1f}°)")
     return 0
 
 

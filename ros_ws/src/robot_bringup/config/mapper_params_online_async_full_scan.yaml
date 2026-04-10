@@ -1,5 +1,6 @@
-# slam_toolbox 在线异步 — 订阅 RGB-D 链生成的虚拟激光 /scan_rgbd
-# 其余参数与 ros-humble-slam-toolbox 默认 mapper_params_online_async.yaml 一致
+# slam_toolbox 在线异步 — 订阅原始 /scan 建图（人物障碍会进图）。
+# 与 RGB+YOLO 的「先标记、保存地图后再清障」流程配合：见 person_strip_recorder + strip_saved_map_person_free。
+# 其余参数与 mapper_params_online_async_scan_filtered.yaml 一致。
 
 slam_toolbox:
   ros__parameters:
@@ -14,7 +15,7 @@ slam_toolbox:
     odom_frame: odom
     map_frame: map
     base_frame: base_footprint
-    scan_topic: /scan_rgbd
+    scan_topic: /scan
     use_map_saver: true
     mode: mapping
 

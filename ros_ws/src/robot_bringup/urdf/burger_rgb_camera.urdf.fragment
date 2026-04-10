@@ -1,4 +1,4 @@
-  <!-- 与官方 turtlebot3_waffle 上 RGB 安装位姿一致，挂在 burger 的 base_link，供 Gazebo+TF+YOLO 对齐 -->
+  <!-- 与 waffle 上前 RGB 安装位姿一致；Gazebo SDF 中水平视场约 135°（见 prepare_burger_rgb_camera_sdf.py） -->
   <link name="camera_rgb_frame">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>

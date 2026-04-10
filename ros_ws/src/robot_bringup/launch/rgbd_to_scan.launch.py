@@ -70,7 +70,8 @@ def launch_setup(context, *args, **kwargs):
                     'angle_increment': 0.00872,
                     'scan_time': 0.1,
                     'range_min': 0.35,
-                    'range_max': 8.0,
+                    # 与 Gazebo 深度相机 far clip / TurtleBot3 激光量程上限（约 3.5 m）一致
+                    'range_max': 3.5,
                     'use_inf': True,
                     'concurrency_level': 1,
                 },

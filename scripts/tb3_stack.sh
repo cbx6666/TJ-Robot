@@ -27,7 +27,7 @@ else
   echo "         否则 robot_bringup 的 launch 不可用。" >&2
 fi
 
-# 运行模式：laser=默认 burger 轻量 | assist=waffle（默认）或显式 burger；burger+laser+YOLO 链自动挂 RGB 相机 SDF
+# 运行模式：laser=默认 burger | assist=默认 burger（RGB+YOLO 链与项目基线一致）；显式 waffle/waffle_pi 可注入深度
 TB3_STACK_MODE="${TB3_STACK_MODE:-laser}"
 RGBD_DEPTH_IMAGE_TOPIC="${RGBD_DEPTH_IMAGE_TOPIC:-/tb3_depth_only/depth/image_raw}"
 RGBD_DEPTH_CAMERA_INFO_TOPIC="${RGBD_DEPTH_CAMERA_INFO_TOPIC:-/tb3_depth_only/depth/camera_info}"
@@ -37,8 +37,17 @@ YOLO_CAMERA_INFO_TOPIC="${YOLO_CAMERA_INFO_TOPIC:-/camera/camera_info}"
 YOLO_DEVICE="${YOLO_DEVICE:-auto}"
 # assist：是否启动 depth→/scan_rgbd（默认 0 省算力；需深度调试时设 1）
 TB3_ASSIST_RGBD_BRIDGE="${TB3_ASSIST_RGBD_BRIDGE:-0}"
-# 是否用 RGB+YOLO 方位角过滤 /scan→/scan_filtered 并让 SLAM 订阅 filtered（需已 build human_yolo_seg）
+# 是否用 RGB+YOLO 人物链（需已 build human_yolo_seg）。具体建图方式见 TB3_PERSON_SLAM_MODE。
 TB3_ASSIST_SCAN_FILTER="${TB3_ASSIST_SCAN_FILTER:-1}"
+# mark_then_strip（默认）：SLAM 用原始 /scan，person_strip_recorder 记录人物 map 点，保存地图后靠 strip_saved_map_person_free 清障
+# filtered：scan_person_filter 发布 /scan_filtered，SLAM 订阅 /scan_filtered（旧行为）
+TB3_PERSON_SLAM_MODE="${TB3_PERSON_SLAM_MODE:-mark_then_strip}"
+# YOLO 人物方位角：linear_fov=粗略像素×视场；tf_geometry=内参+TF+地面（显式传入以免未 colcon 时仍用旧 install 默认）
+TB3_PERSON_AZIMUTH_MODE="${TB3_PERSON_AZIMUTH_MODE:-linear_fov}"
+# 是否额外起 scan_map_colored_cloud（整帧 /scan 投 map 上色；默认 0 减负；filtered 且要看整帧人向激光可设 1）
+TB3_ENABLE_SCAN_MAP_COLORED="${TB3_ENABLE_SCAN_MAP_COLORED:-0}"
+# （已弃用）原双路 YOLO+后摄；burger 现仅前向宽视场 RGB，设 1 时脚本会告警并仍走单路
+TB3_YOLO_360="${TB3_YOLO_360:-0}"
 
 if [[ "${SLAM_SENSOR:-}" == "rgbd" ]]; then
   echo "WARNING: SLAM_SENSOR=rgbd 已弃用，等价于 TB3_STACK_MODE=assist（仍只以 /scan 建图）" >&2
@@ -47,11 +56,11 @@ fi
 
 if [[ "${TB3_STACK_MODE}" == "assist" ]]; then
   if [[ -z "${TURTLEBOT3_MODEL:-}" ]]; then
-    export TURTLEBOT3_MODEL="waffle"
-    echo "TB3_STACK_MODE=assist：未指定 TURTLEBOT3_MODEL，默认 waffle（RGB+可选深度）" >&2
+    export TURTLEBOT3_MODEL="burger"
+    echo "TB3_STACK_MODE=assist：未指定 TURTLEBOT3_MODEL，默认 burger（RGB+激光/YOLO 链；无深度注入，需深度请设 waffle）" >&2
   elif [[ "${TURTLEBOT3_MODEL}" != "waffle" && "${TURTLEBOT3_MODEL}" != "waffle_pi" && "${TURTLEBOT3_MODEL}" != "burger" ]]; then
-    export TURTLEBOT3_MODEL="waffle"
-    echo "TB3_STACK_MODE=assist：不支持的模型，已改为 waffle" >&2
+    export TURTLEBOT3_MODEL="burger"
+    echo "TB3_STACK_MODE=assist：不支持的模型，已改为 burger" >&2
   fi
 else
   export TURTLEBOT3_MODEL="${TURTLEBOT3_MODEL:-burger}"
@@ -92,6 +101,10 @@ if [[ -d "/opt/ros/humble/lib" ]]; then
   export GAZEBO_PLUGIN_PATH="/opt/ros/humble/lib${GAZEBO_PLUGIN_PATH:+:${GAZEBO_PLUGIN_PATH}}"
 fi
 export TB3_LOG_DIR="${TB3_LOG_DIR:-/tmp/tb3_stack}"
+# TB3_HEADLESS=1 等价于 TB3_NO_GUI=1：不启 gzclient 与 RViz2，仅 gzserver + 后台节点，减轻图形与 CPU 占用
+if [[ "${TB3_HEADLESS:-0}" == "1" ]]; then
+  export TB3_NO_GUI=1
+fi
 # wait_for_service / wait_for_topic / wait_for_set_entity_state 里每次探测的间隔（秒）；过小会增加 ros2 CLI 调用频率
 TB3_WAIT_POLL_SEC="${TB3_WAIT_POLL_SEC:-0.5}"
 
@@ -111,7 +124,8 @@ OBSTACLE_SDF_FILE="${OBSTACLE_SDF_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringu
 OBSTACLE_MOVER_FILE="${OBSTACLE_MOVER_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/scripts/moving_obstacle_controller.py}"
 OBSTACLE_START_X="${OBSTACLE_START_X:-0.8}"
 OBSTACLE_START_Y="${OBSTACLE_START_Y:-0.0}"
-OBSTACLE_START_Z="${OBSTACLE_START_Z:-0.2}"
+# 贴地：过高则整人在激光水平面之上，/scan 扫不到；若网格陷地可略调到 0.01～0.05
+OBSTACLE_START_Z="${OBSTACLE_START_Z:-0.0}"
 OBSTACLE_CENTER_X="${OBSTACLE_CENTER_X:-0.8}"
 OBSTACLE_CENTER_Y="${OBSTACLE_CENTER_Y:-0.0}"
 OBSTACLE_AMPLITUDE_X="${OBSTACLE_AMPLITUDE_X:-0.8}"
@@ -143,6 +157,9 @@ cleanup_old() {
   pkill -9 -f pointcloud_to_laserscan_node 2>/dev/null || true
   pkill -9 -f yolo_person_seg_node 2>/dev/null || true
   pkill -9 -f scan_person_filter_node 2>/dev/null || true
+  pkill -9 -f person_strip_recorder_node 2>/dev/null || true
+  pkill -9 -f scan_map_colored_cloud_node 2>/dev/null || true
+  pkill -9 -f azimuth_union_node 2>/dev/null || true
   pkill -9 -f depth_image_to_viz 2>/dev/null || true
   pkill -9 -f tb3_moving_obstacle.py 2>/dev/null || true
   pkill -9 -f moving_obstacle_controller.py 2>/dev/null || true
@@ -196,6 +213,24 @@ wait_for_topic() {
     sleep "${TB3_WAIT_POLL_SEC}"
   done
   return 1
+}
+
+# do_start 分步计时：本段耗时 + 累计（秒，精度 1s）。关闭：TB3_START_BENCH=0
+tb3_bench_init() {
+  _TB3_BENCH_T0="${SECONDS}"
+  _TB3_BENCH_P0="${SECONDS}"
+}
+
+tb3_bench_mark() {
+  if [[ "${TB3_START_BENCH:-1}" != "1" ]]; then
+    return 0
+  fi
+  local label="$1"
+  local now="${SECONDS}"
+  local dphase=$((now - _TB3_BENCH_P0))
+  local dtotal=$((now - _TB3_BENCH_T0))
+  printf '[计时] %s: 本段 %ds | 累计 %ds\n' "${label}" "${dphase}" "${dtotal}"
+  _TB3_BENCH_P0="${SECONDS}"
 }
 
 check_topic() {
@@ -341,7 +376,7 @@ Visualization Manager:
       Use rainbow: true
       Value: true
     - Class: rviz_default_plugins/Image
-      Enabled: true
+      Enabled: false
       Max Value: 1
       Median window: 5
       Min Value: 0
@@ -401,12 +436,57 @@ Visualization Manager:
       Enabled: true
       Name: Map
       Topic:
-        Depth: 1
+        Depth: 10
         Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /map
       Use Timestamp: false
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz_default_plugins/PointCloud2
+      Color: 255; 255; 0
+      Color Transformer: RGB8
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: 人物标记（亮黄点云，叠在地图上）
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (m): 0.06499999761581421
+      Style: Flat Squares
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /human_yolo/person_laser_map_cloud
+      Use Fixed Frame: true
+      Use rainbow: false
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: 人物方位角（绿扇形+黄字角度，看 3D 窗）
+      Topic:
+        Depth: 10
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /human_yolo/person_azimuth_markers
       Value: true
     - Alpha: 1
       Class: rviz_default_plugins/RobotModel
@@ -433,7 +513,7 @@ Visualization Manager:
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
-    Fixed Frame: odom
+    Fixed Frame: map
     Frame Rate: 30
   Name: root
   Tools:
@@ -504,8 +584,10 @@ EOF
 }
 
 do_start() {
+  tb3_bench_init
   echo "[1/12] Cleaning old processes"
   cleanup_old
+  tb3_bench_mark "1/12 清理旧进程"
 
   echo "[2/12] Using world: ${WORLD_FILE}"
   echo "[2/12] Using map pgm: ${MAP_PGM_FILE}, yaml: ${MAP_YAML_FILE}"
@@ -526,6 +608,7 @@ do_start() {
     tail -n 80 "${LOG_DIR}/gzserver.log" || true
     exit 1
   fi
+  tb3_bench_mark "2/12 gzserver 启动并等待 /spawn_entity"
 
   echo "[3/12] Expanding URDF and starting robot_state_publisher"
   TB3_DESC_SHARE="$(ros2 pkg prefix turtlebot3_description 2>/dev/null)/share/turtlebot3_description"
@@ -629,9 +712,11 @@ do_start() {
     tail -n 80 "${LOG_DIR}/robot_state_publisher.log" || true
     exit 1
   fi
+  tb3_bench_mark "3/12 URDF/SDF、robot_state_publisher、等待 /tf_static"
 
   echo "[4/12] Publishing /robot_description"
   publish_robot_description
+  tb3_bench_mark "4/12 发布 /robot_description"
 
   echo "[5/12] Spawning TurtleBot3 entity"
   TB3_SPAWN_FILE="${MODEL_FILE}"
@@ -653,6 +738,7 @@ do_start() {
     tail -n 60 "${LOG_DIR}/spawn_entity.log" || true
     exit 1
   fi
+  tb3_bench_mark "5/12 spawn TurtleBot3"
 
   echo "[6/12] Spawning moving obstacle"
   if [[ ! -f "${OBSTACLE_SDF_FILE}" ]]; then
@@ -672,6 +758,7 @@ do_start() {
     tail -n 30 "${LOG_DIR}/gzserver.log" || true
     exit 1
   fi
+  tb3_bench_mark "6/12 spawn 动态障碍物"
 
   local obstacle_mover_pid=""
   local set_entity_state_service=""
@@ -720,31 +807,58 @@ do_start() {
   else
     echo "[7/12] WARNING: no set_entity_state service and no gz command found"
   fi
+  tb3_bench_mark "7/12 等待 /set_entity_state（若有）并启动障碍物控制器"
 
-  local scan_filter_pid=""
   local yolo_pid=""
   local use_filtered_slam=0
   local filtered_slam_yaml=""
   if [[ "${TB3_ASSIST_SCAN_FILTER}" == "1" ]] && ros2 pkg prefix human_yolo_seg >/dev/null 2>&1; then
-    if _brp="$(ros2 pkg prefix robot_bringup 2>/dev/null)" && [[ -f "${_brp}/share/robot_bringup/config/mapper_params_online_async_scan_filtered.yaml" ]]; then
-      filtered_slam_yaml="${_brp}/share/robot_bringup/config/mapper_params_online_async_scan_filtered.yaml"
-    elif [[ -f "${SCRIPT_DIR}/../ros_ws/src/robot_bringup/config/mapper_params_online_async_scan_filtered.yaml" ]]; then
-      filtered_slam_yaml="${SCRIPT_DIR}/../ros_ws/src/robot_bringup/config/mapper_params_online_async_scan_filtered.yaml"
+    local _slam_cfg_name="mapper_params_online_async_full_scan.yaml"
+    if [[ "${TB3_PERSON_SLAM_MODE}" == "filtered" ]]; then
+      _slam_cfg_name="mapper_params_online_async_scan_filtered.yaml"
+    fi
+    if _brp="$(ros2 pkg prefix robot_bringup 2>/dev/null)" && [[ -f "${_brp}/share/robot_bringup/config/${_slam_cfg_name}" ]]; then
+      filtered_slam_yaml="${_brp}/share/robot_bringup/config/${_slam_cfg_name}"
+    elif [[ -f "${SCRIPT_DIR}/../ros_ws/src/robot_bringup/config/${_slam_cfg_name}" ]]; then
+      filtered_slam_yaml="${SCRIPT_DIR}/../ros_ws/src/robot_bringup/config/${_slam_cfg_name}"
     fi
     if [[ -n "${filtered_slam_yaml}" ]]; then
       use_filtered_slam=1
     else
-      echo "[8/12] WARNING: 未找到 mapper_params_online_async_scan_filtered.yaml，SLAM 仍将订阅 /scan"
+      echo "[8/12] WARNING: 未找到 ${_slam_cfg_name}，SLAM 将使用默认参数（通常仍为 /scan）"
     fi
-    echo "[8/12] RGB 人物掩膜：scan_person_filter + YOLO（/scan→/scan_filtered；device=${YOLO_DEVICE}）"
-    setsid ros2 run human_yolo_seg scan_person_filter_node --ros-args -p use_sim_time:=true \
-      >"${LOG_DIR}/scan_person_filter.log" 2>&1 < /dev/null &
-    scan_filter_pid=$!
+    TB3_SCAN_FOV_LIMIT="${TB3_SCAN_FOV_LIMIT:-0}"
+    TB3_SCAN_FOV_MIN_DEG="${TB3_SCAN_FOV_MIN_DEG:--70.0}"
+    TB3_SCAN_FOV_MAX_DEG="${TB3_SCAN_FOV_MAX_DEG:-70.0}"
+    local _lim_fov="false"
+    if [[ "${TB3_SCAN_FOV_LIMIT}" == "1" ]]; then
+      _lim_fov="true"
+    fi
+    local _person_mode="${TB3_PERSON_SLAM_MODE:-mark_then_strip}"
+    local _enable_scan_map_colored="false"
+    if [[ "${TB3_ENABLE_SCAN_MAP_COLORED}" == "1" ]]; then
+      _enable_scan_map_colored="true"
+    fi
+
+    if [[ "${TB3_YOLO_360}" == "1" ]]; then
+      echo "[8/12] WARNING: TB3_YOLO_360=1 已弃用（burger 无后摄）；改用单路 YOLO + 宽视场前摄" >&2
+    fi
+    if [[ "${_person_mode}" == "filtered" ]]; then
+      echo "[8/12] YOLO + 人物链：scan_person_filter + YOLO（/scan→/scan_filtered；map 上人点需 TB3_ENABLE_SCAN_MAP_COLORED=1 或改 mark_then_strip；device=${YOLO_DEVICE}）"
+    else
+      echo "[8/12] YOLO + 人物链：person_strip_recorder + YOLO + 方位角 Marker（SLAM 用 /scan；可选 TB3_ENABLE_SCAN_MAP_COLORED=1 整帧上色；device=${YOLO_DEVICE}）"
+    fi
     setsid ros2 launch human_yolo_seg yolo_person_seg.launch.py \
       use_sim_time:=true \
       image_topic:="${YOLO_IMAGE_TOPIC}" \
       camera_info_topic:="${YOLO_CAMERA_INFO_TOPIC}" \
       device:="${YOLO_DEVICE}" \
+      person_azimuth_mode:="${TB3_PERSON_AZIMUTH_MODE}" \
+      person_slam_mode:="${_person_mode}" \
+      limit_scan_to_fov:="${_lim_fov}" \
+      fov_min_deg:="${TB3_SCAN_FOV_MIN_DEG}" \
+      fov_max_deg:="${TB3_SCAN_FOV_MAX_DEG}" \
+      enable_scan_map_colored:=${_enable_scan_map_colored} \
       >"${LOG_DIR}/yolo_person_seg.log" 2>&1 < /dev/null &
     yolo_pid=$!
   else
@@ -754,11 +868,39 @@ do_start() {
       echo "[8/12] TB3_ASSIST_SCAN_FILTER=0：跳过 YOLO 与 scan 过滤"
     fi
   fi
+  tb3_bench_mark "8/12 YOLO + 人物链（scan 过滤 / 事后清障 或跳过）"
+
+  # 仅激光 / 未起 YOLO 链时仍用 full_scan.yaml，与 assist+mark_then_strip 的 slam 时序一致（map_update_interval 等）
+  if [[ "${use_filtered_slam}" -eq 0 ]]; then
+    local _full_scan_cfg=""
+    if _brp="$(ros2 pkg prefix robot_bringup 2>/dev/null)" && [[ -f "${_brp}/share/robot_bringup/config/mapper_params_online_async_full_scan.yaml" ]]; then
+      _full_scan_cfg="${_brp}/share/robot_bringup/config/mapper_params_online_async_full_scan.yaml"
+    elif [[ -f "${SCRIPT_DIR}/../ros_ws/src/robot_bringup/config/mapper_params_online_async_full_scan.yaml" ]]; then
+      _full_scan_cfg="${SCRIPT_DIR}/../ros_ws/src/robot_bringup/config/mapper_params_online_async_full_scan.yaml"
+    fi
+    if [[ -n "${_full_scan_cfg}" ]]; then
+      filtered_slam_yaml="${_full_scan_cfg}"
+      use_filtered_slam=1
+    else
+      echo "WARNING: 未找到 mapper_params_online_async_full_scan.yaml，SLAM 将使用 slam_toolbox 包默认参数（与 assist 建图可能不一致）"
+    fi
+  fi
 
   if [[ "${use_filtered_slam}" -eq 1 ]]; then
-    echo "[9/12] Starting slam_toolbox（订阅 /scan_filtered）"
+    case "${filtered_slam_yaml}" in
+      *scan_filtered.yaml)
+        echo "[9/12] Starting slam_toolbox（订阅 /scan_filtered）"
+        ;;
+      *)
+        if [[ "${TB3_ASSIST_SCAN_FILTER}" == "1" && "${TB3_PERSON_SLAM_MODE:-mark_then_strip}" != "filtered" ]]; then
+          echo "[9/12] Starting slam_toolbox（订阅 /scan；人物区域见 ~/.ros/tj_person_strip_regions.yaml）"
+        else
+          echo "[9/12] Starting slam_toolbox（订阅 /scan；slam 使用 full_scan.yaml，与 YOLO+mark_then_strip 参数一致）"
+        fi
+        ;;
+    esac
   else
-    echo "[9/12] Starting slam_toolbox（订阅 /scan）"
+    echo "[9/12] Starting slam_toolbox（订阅 /scan；slam_toolbox 包默认 yaml）"
   fi
   local slam_log="${LOG_DIR}/slam_backend.log"
   if [[ "${use_filtered_slam}" -eq 1 ]]; then
@@ -778,6 +920,7 @@ do_start() {
     tail -n 120 "${slam_log}" || true
     exit 1
   fi
+  tb3_bench_mark "9/12 slam_toolbox 启动并等待 /map"
 
   local rgbd_bridge_pid=""
   if [[ "${TB3_STACK_MODE}" == "assist" && "${TB3_ASSIST_RGBD_BRIDGE}" == "1" ]]; then
@@ -793,6 +936,7 @@ do_start() {
   else
     echo "[10/12] laser 模式：无 RGB-D 桥（assist + TB3_ASSIST_RGBD_BRIDGE=1 可开启）"
   fi
+  tb3_bench_mark "10/12 rgbd_to_scan（或跳过）"
 
   echo "[11/12] Preparing RViz config"
   if [[ -f "${RVIZ_CONFIG_FILE}" ]]; then
@@ -801,16 +945,20 @@ do_start() {
     echo "[11/12] RViz config not found, generating default: ${RVIZ_CONFIG_FILE}"
     generate_rviz_config
   fi
+  tb3_bench_mark "11/12 RViz 配置"
 
   echo "[12/12] Verifying key topics"
+  # 只调用一次 ros2 topic list（WSL+/mnt/e 下每次 CLI 冷启动可达数秒～十余秒，循环内重复调用会把本步拖到 ~100s）
+  local _tb3_topic_list
+  _tb3_topic_list="$(ros2 topic list 2>/dev/null)" || _tb3_topic_list=""
   for topic in /clock /odom /tf /tf_static /robot_description /map /map_metadata; do
-    if ros2 topic list | grep -qx "${topic}"; then
+    if printf '%s\n' "${_tb3_topic_list}" | grep -qx "${topic}"; then
       echo "  OK  ${topic}"
     else
       echo "  MISS ${topic}"
     fi
   done
-  if ros2 topic list | grep -qx "/scan"; then
+  if printf '%s\n' "${_tb3_topic_list}" | grep -qx "/scan"; then
     echo "  OK  /scan"
   else
     echo "  MISS /scan"
@@ -847,17 +995,22 @@ do_start() {
     else
       echo "  WARN /human_yolo/person_azimuth_ranges 无发布者"
     fi
-    if [[ "${_sf}" -gt 0 ]]; then
-      echo "  OK  /scan_filtered (publishers=${_sf})"
+    if [[ "${TB3_PERSON_SLAM_MODE:-mark_then_strip}" == "filtered" ]]; then
+      if [[ "${_sf}" -gt 0 ]]; then
+        echo "  OK  /scan_filtered (publishers=${_sf})"
+      else
+        echo "  WARN /scan_filtered 无发布者（检查 yolo_person_seg.log 或 yolo_person_map_pipeline.log）"
+      fi
     else
-      echo "  WARN /scan_filtered 无发布者（检查 scan_person_filter.log）"
+      echo "  （mark_then_strip：未使用 /scan_filtered；人物记录见 ~/.ros/tj_person_strip_regions.yaml）"
     fi
   fi
+  tb3_bench_mark "12/12 话题检查（含 YOLO）"
 
   local gzclient_pid=""
   local rviz_pid=""
   if [[ "${TB3_NO_GUI:-0}" == "1" ]]; then
-    echo "GUI: Skipping gzclient and RViz2 (TB3_NO_GUI=1)"
+    echo "GUI: Skipping gzclient and RViz2 (TB3_NO_GUI=1${TB3_HEADLESS:+ / TB3_HEADLESS=1})"
   else
     echo "GUI: Starting gzclient and RViz2"
     setsid gzclient \
@@ -873,6 +1026,15 @@ do_start() {
       >"${LOG_DIR}/rviz2.log" 2>&1 < /dev/null &
     rviz_pid=$!
   fi
+  if [[ "${TB3_NO_GUI:-0}" == "1" ]]; then
+    tb3_bench_mark "GUI 已跳过（TB3_NO_GUI）"
+  else
+    tb3_bench_mark "GUI 启动 gzclient + rviz2"
+  fi
+
+  if [[ "${TB3_START_BENCH:-1}" == "1" ]]; then
+    printf '[计时] start 总耗时: %ds\n' "$((SECONDS - _TB3_BENCH_T0))"
+  fi
 
   echo
   echo "PIDs:"
@@ -882,11 +1044,8 @@ do_start() {
   if [[ -n "${rgbd_bridge_pid}" ]]; then
     echo "  rgbd_to_scan (depth→/scan_rgbd): ${rgbd_bridge_pid}"
   fi
-  if [[ -n "${scan_filter_pid}" ]]; then
-    echo "  scan_person_filter: ${scan_filter_pid}"
-  fi
   if [[ -n "${yolo_pid}" ]]; then
-    echo "  yolo_person_seg: ${yolo_pid}"
+    echo "  yolo_person_seg (launch): ${yolo_pid}"
   fi
   if [[ -n "${obstacle_mover_pid}" ]]; then
     echo "  moving_obstacle_controller: ${obstacle_mover_pid}"
@@ -920,9 +1079,18 @@ do_start() {
     echo "  官方遥控: ros2 run turtlebot3_teleop teleop_keyboard"
     echo
     if [[ -n "${yolo_pid}" ]]; then
-      echo "建图: SLAM 默认订阅 /scan_filtered（RGB+YOLO 人物方向掩膜）；原 /scan 仍在。深度→/scan_rgbd 默认关闭，需要时: TB3_STACK_MODE=assist TB3_ASSIST_RGBD_BRIDGE=1"
+      if [[ "${TB3_PERSON_SLAM_MODE:-mark_then_strip}" == "filtered" ]]; then
+        echo "建图: SLAM 订阅 /scan_filtered（旧模式）。恢复「先完整建图再清人」: export TB3_PERSON_SLAM_MODE=mark_then_strip"
+      else
+        echo "建图: SLAM 订阅原始 /scan；人物 map 点写入 ~/.ros/tj_person_strip_regions.yaml，保存地图后: ros2 run human_yolo_seg strip_saved_map_person_free <map.yaml> <regions.yaml>。旧掩膜模式: TB3_PERSON_SLAM_MODE=filtered"
+      fi
+      echo "深度→/scan_rgbd 默认关闭，需要时: TB3_STACK_MODE=assist TB3_ASSIST_RGBD_BRIDGE=1"
     elif [[ "${TB3_STACK_MODE}" == "assist" ]]; then
-      echo "建图: /scan；assist 已起 waffle+深度相机，RGB-D 桥需 TB3_ASSIST_RGBD_BRIDGE=1；YOLO 掩膜需 colcon build human_yolo_seg 且 TB3_ASSIST_SCAN_FILTER=1"
+      if [[ "${TURTLEBOT3_MODEL}" == "burger" ]]; then
+        echo "建图: /scan；assist+burger 仅 RGB（无深度 SDF）；深度+RGB-D 桥请 TURTLEBOT3_MODEL=waffle 且 TB3_ASSIST_RGBD_BRIDGE=1；YOLO 掩膜需 human_yolo_seg 且 TB3_ASSIST_SCAN_FILTER=1"
+      else
+        echo "建图: /scan；assist+${TURTLEBOT3_MODEL} 含深度相机，RGB-D 桥需 TB3_ASSIST_RGBD_BRIDGE=1；YOLO 掩膜需 human_yolo_seg 且 TB3_ASSIST_SCAN_FILTER=1"
+      fi
     else
       echo "建图: /scan；人物掩膜: 确保已 build human_yolo_seg（默认 TB3_ASSIST_SCAN_FILTER=1）；深度辅助: TB3_STACK_MODE=assist TB3_ASSIST_RGBD_BRIDGE=1"
     fi
@@ -974,10 +1142,14 @@ do_check() {
     else
       echo "WARN /human_yolo/person_azimuth_ranges 无发布者"
     fi
-    if [[ "${_sf}" -gt 0 ]]; then
-      echo "OK   /scan_filtered (publishers=${_sf})"
+    if [[ "${TB3_PERSON_SLAM_MODE:-mark_then_strip}" == "filtered" ]]; then
+      if [[ "${_sf}" -gt 0 ]]; then
+        echo "OK   /scan_filtered (publishers=${_sf})"
+      else
+        echo "WARN /scan_filtered 无发布者"
+      fi
     else
-      echo "WARN /scan_filtered 无发布者"
+      echo "OK   mark_then_strip：不检查 /scan_filtered（人物区域见 ~/.ros/tj_person_strip_regions.yaml）"
     fi
   fi
 
@@ -1053,16 +1225,54 @@ do_logs() {
     yolo|yolo_person)
       if [[ -f "${LOG_DIR}/yolo_person_seg.log" ]]; then
         tail -f "${LOG_DIR}/yolo_person_seg.log"
+      elif [[ -f "${LOG_DIR}/yolo_person_seg_front.log" ]]; then
+        tail -f "${LOG_DIR}/yolo_person_seg_front.log"
       else
-        echo "No yolo log: ${LOG_DIR}/yolo_person_seg.log（需已 build human_yolo_seg 且栈启动过 YOLO）"
+        echo "No yolo log: ${LOG_DIR}/yolo_person_seg.log（或 360° 时 yolo_person_seg_front.log）"
+        exit 1
+      fi
+      ;;
+    strip_recorder|person_strip)
+      if [[ -f "${LOG_DIR}/person_strip_recorder.log" ]]; then
+        tail -f "${LOG_DIR}/person_strip_recorder.log"
+      elif [[ -f "${LOG_DIR}/yolo_person_seg.log" ]]; then
+        tail -f "${LOG_DIR}/yolo_person_seg.log"
+      elif [[ -f "${LOG_DIR}/yolo_person_map_pipeline.log" ]]; then
+        tail -f "${LOG_DIR}/yolo_person_map_pipeline.log"
+      else
+        echo "无 strip 相关日志（已与 YOLO 合并到 yolo_person_seg.log / yolo_person_map_pipeline.log）"
         exit 1
       fi
       ;;
     scan_filter|scan_person)
       if [[ -f "${LOG_DIR}/scan_person_filter.log" ]]; then
         tail -f "${LOG_DIR}/scan_person_filter.log"
+      elif [[ -f "${LOG_DIR}/yolo_person_seg.log" ]]; then
+        tail -f "${LOG_DIR}/yolo_person_seg.log"
+      elif [[ -f "${LOG_DIR}/yolo_person_map_pipeline.log" ]]; then
+        tail -f "${LOG_DIR}/yolo_person_map_pipeline.log"
       else
-        echo "No scan_person_filter log: ${LOG_DIR}/scan_person_filter.log"
+        echo "无 scan_person_filter 独立日志（已合并到上述 yolo_person*.log）"
+        exit 1
+      fi
+      ;;
+    scan_map_colored|scan_colored)
+      if [[ -f "${LOG_DIR}/scan_map_colored_cloud.log" ]]; then
+        tail -f "${LOG_DIR}/scan_map_colored_cloud.log"
+      elif [[ -f "${LOG_DIR}/yolo_person_seg.log" ]]; then
+        tail -f "${LOG_DIR}/yolo_person_seg.log"
+      elif [[ -f "${LOG_DIR}/yolo_person_map_pipeline.log" ]]; then
+        tail -f "${LOG_DIR}/yolo_person_map_pipeline.log"
+      else
+        echo "无 scan_map_colored 独立日志（默认未起该节点；需 TB3_ENABLE_SCAN_MAP_COLORED=1，或看 yolo_person*.log）"
+        exit 1
+      fi
+      ;;
+    yolo_map_pipeline|map_pipeline)
+      if [[ -f "${LOG_DIR}/yolo_person_map_pipeline.log" ]]; then
+        tail -f "${LOG_DIR}/yolo_person_map_pipeline.log"
+      else
+        echo "无 yolo_person_map_pipeline.log（已弃用双路 YOLO；人物链日志见 yolo_person_seg.log）"
         exit 1
       fi
       ;;
@@ -1072,7 +1282,7 @@ do_logs() {
       ;;
     *)
       echo "Unknown log target: ${target}"
-      echo "Use one of: all, gzserver, gzclient, rviz, rsp, slam, robot_description, spawn, obstacle, rgbd, yolo, scan_filter"
+      echo "Use one of: all, gzserver, gzclient, rviz, rsp, slam, robot_description, spawn, obstacle, rgbd, yolo, yolo_map_pipeline, strip_recorder, scan_filter, scan_map_colored"
       exit 1
       ;;
   esac
@@ -1085,20 +1295,26 @@ Usage:
   bash scripts/tb3_stack.sh stop
   bash scripts/tb3_stack.sh check
   bash scripts/tb3_stack.sh rviz
-  bash scripts/tb3_stack.sh logs [all|gzserver|gzclient|rviz|rsp|slam|robot_description|spawn|obstacle|rgbd|yolo|scan_filter]
+  bash scripts/tb3_stack.sh logs [all|gzserver|gzclient|rviz|rsp|slam|robot_description|spawn|obstacle|rgbd|yolo|yolo_map_pipeline|strip_recorder|scan_filter|scan_map_colored]
 
 Environment:
-  TB3_STACK_MODE=laser|assist  laser=默认 burger；assist 未指定模型时=waffle，也可 TURTLEBOT3_MODEL=burger（仅 RGB、无深度注入）
-  TB3_ASSIST_SCAN_FILTER=0|1  默认 1：若已 build human_yolo_seg，则起 YOLO + scan 过滤，SLAM 订阅 /scan_filtered
+  TB3_STACK_MODE=laser|assist  laser=默认 burger；assist 未指定模型时=burger（RGB、无深度注入）；需深度请 TURTLEBOT3_MODEL=waffle|waffle_pi
+  TB3_ASSIST_SCAN_FILTER=0|1  默认 1：若已 build human_yolo_seg，则 ros2 launch yolo_person_seg（YOLO + strip|filter + 方位角 Marker；整帧 map 上色见 TB3_ENABLE_SCAN_MAP_COLORED）
+  TB3_ENABLE_SCAN_MAP_COLORED=0|1  默认 0：为 1 时额外起 scan_map_colored_cloud（整帧激光投 map；filtered 且无 strip 时便于看人向）
+  TB3_PERSON_SLAM_MODE=mark_then_strip|filtered  默认 mark_then_strip：SLAM 用 /scan + person_strip_recorder，事后 strip 地图；filtered=旧行为 /scan_filtered 建图
+  TB3_PERSON_AZIMUTH_MODE=linear_fov|tf_geometry  默认 linear_fov：人物方位角粗略法；tf_geometry=内参+TF+地面（传给 yolo_person_seg.launch person_azimuth_mode）
   TB3_ASSIST_RGBD_BRIDGE=0|1  仅 TB3_STACK_MODE=assist 时有效；默认 0 不起 rgbd_to_scan；1 时起 depth→/scan_rgbd
   RGBD_DEPTH_IMAGE_TOPIC=/tb3_depth_only/depth/image_raw  assist 且 TB3_ASSIST_RGBD_BRIDGE=1 时传给 rgbd_to_scan
   RGBD_DEPTH_CAMERA_INFO_TOPIC=/tb3_depth_only/depth/camera_info
   YOLO_IMAGE_TOPIC=/camera/image_raw
   YOLO_CAMERA_INFO_TOPIC=/camera/camera_info
+  TB3_YOLO_360=1  已弃用（burger 无后摄）；设 1 仅告警，仍走单路 YOLO
   YOLO_DEVICE=auto|cpu|cuda:0  YOLO 推理设备（默认 auto：检测到 CUDA 则用 GPU）
   TB3_NO_GUI=1   Skip gzclient and RViz2 on start (headless / CI)
+  TB3_HEADLESS=1 Same as TB3_NO_GUI=1 (alias for no GUI)
+  TB3_START_BENCH=0|1  默认 1：start 时打印 [计时] 分步与总耗时（秒）；0 关闭
   TB3_WAIT_POLL_SEC=0.5  等待 /spawn_entity、/tf_static、/map 等时的轮询间隔（秒）；可略调小以加快就绪检测（略增 CPU）
-  TURTLEBOT3_MODEL=burger|waffle|waffle_pi  laser 默认 burger；assist 未指定时默认 waffle，也可显式 burger
+  TURTLEBOT3_MODEL=burger|waffle|waffle_pi  laser 与 assist 未指定时均默认 burger；需仿真深度 SDF 时显式 waffle 或 waffle_pi
   （已弃用）SLAM_SENSOR=rgbd 等价于 TB3_STACK_MODE=assist（主建图仍为激光）
   TB3_GAZEBO_HARDWARE_GL=1  跳过 LIBGL_ALWAYS_SOFTWARE（真机 GPU；WSL 勿设，避免 RenderEngine 崩溃）
   RVIZ_CONFIG_FILE=<path>  RViz config path (default: robot_bringup/config/test1.rviz)

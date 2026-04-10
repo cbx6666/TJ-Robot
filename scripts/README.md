@@ -1,40 +1,26 @@
-﻿# Scripts
+﻿# scripts
 
-`scripts` 目录负责环境安装、仿真栈启动、检查和日志查看。
+环境安装与仿真**主控栈**（`tb3_stack.sh`）。
 
-## 主要脚本
+## 脚本
 
-- `setup_env.sh`
-  安装 ROS 2 Humble、Gazebo、TurtleBot3、SLAM Toolbox 和工作区依赖。
+| 文件 | 作用 |
+|------|------|
+| `setup_env.sh` | 安装 ROS 2 Humble、Gazebo、TurtleBot3、SLAM Toolbox 与工作区依赖（按脚本内说明）。 |
+| `bootstrap.sh` | 首次环境冒烟；**源码变更后仍需自行 `colcon build`**。 |
+| `tb3_stack.sh` | **主入口**：Gazebo、生成机器人与障碍、`slam_toolbox`、RViz、可选 **YOLO + 人物激光链**（strip/filter + 方位角 Marker；整帧 map 上色默认关，见 `TB3_ENABLE_SCAN_MAP_COLORED`）。子命令：`start` / `stop` / `check` / `logs` / `rviz`。 |
 
-- `bootstrap.sh`
-  适合首次拉起环境做基础 smoke test。
-  注意：代码拉取后如果 `ros_ws/src` 有变化，仍然需要手动重新执行 `colcon build`。
+## 推荐启动（assist + YOLO）
 
-- `tb3_stack.sh`
-  当前项目的主控脚本，负责：
-  - 启动 Gazebo
-  - 生成 TurtleBot3
-  - 生成动态障碍物
-  - 启动 `slam_toolbox`
-  - 启动 YOLO 和 `scan_person_filter`
-  - 在启用 YOLO 时让 SLAM 订阅 `/scan_filtered`
-  - 启动 RViz
-  - 提供 `start / stop / check / logs / rviz` 子命令
-
-## 推荐流程
+`assist` 且**不写** `TURTLEBOT3_MODEL` → 默认 **Burger**。需要 Waffle 深度时再设 `TURTLEBOT3_MODEL=waffle`。
 
 ```bash
-cd /mnt/d/Homework/robot
-bash scripts/setup_env.sh
+cd <仓库根目录>
+bash scripts/setup_env.sh          # 按需
 
-cd ros_ws
-source /opt/ros/humble/setup.bash
-colcon build
-source install/setup.bash
-cd ..
+cd ros_ws && source /opt/ros/humble/setup.bash && colcon build && source install/setup.bash && cd ..
 
-TB3_STACK_MODE=assist TURTLEBOT3_MODEL=waffle TB3_ASSIST_SCAN_FILTER=1 bash scripts/tb3_stack.sh start
+TB3_STACK_MODE=assist TB3_ASSIST_SCAN_FILTER=1 bash scripts/tb3_stack.sh start
 ```
 
 ## 常用命令
@@ -46,18 +32,26 @@ bash scripts/tb3_stack.sh logs all
 bash scripts/tb3_stack.sh stop
 ```
 
-## 常用环境变量
+`logs` 可查 `yolo`、`yolo_map_pipeline`、`slam` 等，详见脚本内 `usage`。
 
-- `TB3_STACK_MODE=laser|assist`
-- `TB3_ASSIST_SCAN_FILTER=0|1`
-- `TB3_ASSIST_RGBD_BRIDGE=0|1`
-- `TURTLEBOT3_MODEL=burger|waffle`
-- `YOLO_DEVICE=auto|cpu|cuda:0`
-- `TB3_NO_GUI=1`
-- `ROBOT_START_X / ROBOT_START_Y / ROBOT_START_Z / ROBOT_START_YAW`
+## 环境变量（摘录）
 
-## 当前建议
+- **`TB3_STACK_MODE`**：`laser` | `assist`
+- **`TB3_ASSIST_SCAN_FILTER`**：`0` | `1`（`1` 且已安装包时起 YOLO 人物链）
+- **`TB3_PERSON_SLAM_MODE`**：`mark_then_strip`（默认，SLAM 用 `/scan`）| `filtered`（SLAM 用 `/scan_filtered`）
+- **`TB3_ENABLE_SCAN_MAP_COLORED`**：`0`（默认）| `1` 额外起 `scan_map_colored_cloud`（整帧激光投 map）
+- **`TB3_ASSIST_RGBD_BRIDGE`**：`0` | `1`（assist + 深度时）
+- **`TURTLEBOT3_MODEL`**：`burger` | `waffle` | `waffle_pi`
+- **`YOLO_DEVICE`**：`auto` | `cpu` | `cuda:0`
+- **`TB3_NO_GUI` / `TB3_HEADLESS`**：不启 gzclient / RViz2
+- **`TB3_SCAN_FOV_LIMIT`**、**`TB3_SCAN_FOV_MIN_DEG`**、**`TB3_SCAN_FOV_MAX_DEG`**：filtered 模式下限制激光扇区（见脚本注释）
+- **`ROBOT_START_X/Y/Z/YAW`**：生成位姿
 
-- 主流程固定推荐：`TB3_STACK_MODE=assist TURTLEBOT3_MODEL=waffle TB3_ASSIST_SCAN_FILTER=1`
-- `coverage_patrol` 与 YOLO 一起运行时，建图走 `/scan_filtered`，巡航避障仍走 `/scan`
-- `TB3_ASSIST_SCAN_FILTER=0` 只保留为调试 fallback，不再作为项目推荐启动方式
+WSL 下 `ros2` CLI 较慢；`tb3_stack.sh` 的话题检查已尽量合并为单次 `ros2 topic list`。
+
+## 与巡航的关系
+
+- 默认 **mark_then_strip**：建图走 **`/scan`**；**`coverage_patrol`** 仍订阅 **`/scan`** 做近距离避障。
+- **`filtered`**：建图走 **`/scan_filtered`**；巡航仍建议用 **`/scan`** 避障。
+
+存图目录、叠加图等：**`robot_navigation` 包内 README**。

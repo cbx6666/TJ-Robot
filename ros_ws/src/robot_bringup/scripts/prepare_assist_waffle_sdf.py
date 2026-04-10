@@ -14,9 +14,12 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+# 与 TurtleBot3 LDS（/scan）量程上限一致，见 waffle_sim_plugins_gazebo_fragment.xml
+TB3_LASER_RANGE_MAX_M = 3.5
+
 
 def _parse_fragment() -> tuple[ET.Element, ET.Element]:
-    link_xml = """
+    link_xml = f"""
 <link name="camera_depth_frame">
   <sensor name="tb3_depth_sensor" type="depth">
     <always_on>true</always_on>
@@ -31,7 +34,7 @@ def _parse_fragment() -> tuple[ET.Element, ET.Element]:
       </image>
       <clip>
         <near>0.1</near>
-        <far>8.0</far>
+        <far>{TB3_LASER_RANGE_MAX_M}</far>
       </clip>
     </camera>
     <plugin name="tb3_depth_only_plugin" filename="libgazebo_ros_camera.so">

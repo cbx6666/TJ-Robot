@@ -392,8 +392,9 @@
       </camera>
     </gui>
 
+    <!-- z 必须与 2D 激光扫掠高度一致：TB3 base_scan 约在地面 ~0.12m；z=1 时整人在激光平面之上，表现为「扫不到人」 -->
     <actor name="person_walking">
-      <pose>3.0 3.0 1.0 0 0 0</pose>
+      <pose>3.0 3.0 0 0 0 0</pose>
       
       <skin>
         <filename>model://person_walking/meshes/walking.dae</filename>
@@ -411,15 +412,15 @@
         <trajectory id="0" type="walking">
           <waypoint>
             <time>0.0</time>
-            <pose>3.0 3.0 1.0 0 0 0</pose>
+            <pose>3.0 3.0 0 0 0 0</pose>
           </waypoint>
           <waypoint>
             <time>10.0</time>
-            <pose>10.0 3.0 1.0 0 0 0</pose>
+            <pose>10.0 3.0 0 0 0 0</pose>
           </waypoint>
           <waypoint>
             <time>20.0</time>
-            <pose>3.0 3.0 1.0 0 0 0</pose>
+            <pose>3.0 3.0 0 0 0 0</pose>
           </waypoint>
         </trajectory>
       </script>

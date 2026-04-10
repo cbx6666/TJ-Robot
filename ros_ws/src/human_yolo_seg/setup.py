@@ -33,6 +33,13 @@ setup(
             "yolo_person_seg_node = human_yolo_seg.yolo_person_seg_node:main",
             "yolo_person_watch = human_yolo_seg.yolo_person_watch:main",
             "scan_person_filter_node = human_yolo_seg.scan_person_filter_node:main",
+            "person_strip_recorder_node = human_yolo_seg.person_strip_recorder_node:main",
+            "strip_saved_map_person_free = human_yolo_seg.strip_saved_map:main",
+            "annotate_saved_map_person_overlay = human_yolo_seg.annotate_saved_map_person_overlay:main",
+            "snapshot_person_regions_from_cloud = human_yolo_seg.snapshot_person_regions_from_cloud:main",
+            "scan_map_colored_cloud_node = human_yolo_seg.scan_map_colored_cloud_node:main",
+            "azimuth_union_node = human_yolo_seg.azimuth_union_node:main",
+            "person_azimuth_markers_node = human_yolo_seg.person_azimuth_markers_node:main",
         ],
     },
 )

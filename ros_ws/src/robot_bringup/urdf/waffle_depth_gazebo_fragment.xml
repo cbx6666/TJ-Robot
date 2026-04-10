@@ -14,9 +14,10 @@
           <height>480</height>
           <format>R8G8B8</format>
         </image>
+        <!-- far 与 base_scan 激光量程上限一致（waffle_sim_plugins_gazebo_fragment.xml ray range max），减轻渲染与深度射线开销 -->
         <clip>
           <near>0.1</near>
-          <far>8.0</far>
+          <far>3.5</far>
         </clip>
       </camera>
       <plugin filename="libgazebo_ros_camera.so" name="tb3_depth_only_plugin">

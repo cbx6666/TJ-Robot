@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 import time
@@ -21,9 +22,11 @@ from ament_index_python.packages import PackageNotFoundError, get_package_share_
 from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import CameraInfo, Image, JointState
-from std_msgs.msg import Bool, Float32, Int32
+from std_msgs.msg import Bool, Float32, Int32, String
 
 import tf2_ros
+
+from human_yolo_seg.person_scan_sync_utils import norm_angle
 
 
 def _check_numpy_compatible_with_cv_bridge() -> None:
@@ -78,7 +81,8 @@ def resolve_model_path(logger, model_path: str) -> str:
 
 class YoloPersonSegNode(Node):
     def __init__(self) -> None:
-        super().__init__("yolo_person_seg_node")
+        # 与 yolo_person_seg.launch.py 中 name='yolo_person_seg' 一致，便于 ros2 param get /yolo_person_seg …
+        super().__init__("yolo_person_seg")
 
         self.declare_parameter("image_topic", "/camera/image_raw")
         self.declare_parameter("output_topic", "/human_yolo/annotated_image")
@@ -97,6 +101,15 @@ class YoloPersonSegNode(Node):
         self.declare_parameter("person_azimuth_topic", "/human_yolo/person_azimuth_ranges")
         self.declare_parameter("laser_frame_id", "base_scan")
         self.declare_parameter("ground_frame_id", "base_footprint")
+        self.declare_parameter("publish_azimuth_debug", True)
+        self.declare_parameter("azimuth_debug_topic", "/human_yolo/person_azimuth_debug")
+        self.declare_parameter("log_person_azimuth_to_console", True)
+        self.declare_parameter("log_person_azimuth_interval_sec", 1.0)
+        # 人物方位角：tf_geometry=内参+TF+地面求交；linear_fov=框横坐标占图像宽×水平视场（粗略、无 TF）
+        self.declare_parameter("person_azimuth_mode", "linear_fov")
+        self.declare_parameter("person_azimuth_linear_hfov_deg", 0.0)
+        self.declare_parameter("person_azimuth_linear_camera_yaw_deg", 0.0)
+        self.declare_parameter("person_azimuth_linear_use_mask", False)
 
         _check_numpy_compatible_with_cv_bridge()
         YOLO = _try_import_ultralytics()
@@ -153,19 +166,70 @@ class YoloPersonSegNode(Node):
         self._laser_frame = ""
         self._ground_frame = ""
         self._last_cam_warn_mono = 0.0
+        self._pub_az_dbg = None
+        self._log_az_console = False
+        self._log_az_interval = 1.0
+        self._last_azimuth_console_mono = 0.0
+        self._azimuth_mode = "linear_fov"
+        self._linear_hfov_rad: float | None = None
+        self._linear_camera_yaw_rad = 0.0
+        self._linear_use_mask = False
         pub_az = self.get_parameter("publish_person_azimuths").get_parameter_value().bool_value
         if pub_az:
-            az_topic = self.get_parameter("person_azimuth_topic").get_parameter_value().string_value
             ci_topic = self.get_parameter("camera_info_topic").get_parameter_value().string_value
             self._laser_frame = self.get_parameter("laser_frame_id").get_parameter_value().string_value
             self._ground_frame = self.get_parameter("ground_frame_id").get_parameter_value().string_value
-            self._pub_azimuth = self.create_publisher(JointState, az_topic, 10)
-            self._tf_buffer = tf2_ros.Buffer()
-            self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self, spin_thread=True)
-            self.create_subscription(CameraInfo, ci_topic, self._on_cam_info, qos)
-            self.get_logger().info(
-                f"人物方位角: {az_topic}（JointState，header=RGB 时间戳，position=[lo,hi,...]；CameraInfo: {ci_topic}）"
+            _raw = self.get_parameter("person_azimuth_mode").get_parameter_value().string_value.strip().lower()
+            # 空串时勿回退到 tf_geometry（否则与默认 linear_fov 矛盾；常见于未重装旧参数文件）
+            _mode_raw = _raw if _raw else "linear_fov"
+            if _mode_raw not in ("tf_geometry", "linear_fov"):
+                self.get_logger().warning(f"未知 person_azimuth_mode={_mode_raw!r}，改用 tf_geometry")
+                _mode_raw = "tf_geometry"
+            self._azimuth_mode = _mode_raw
+            hfov_deg = float(self.get_parameter("person_azimuth_linear_hfov_deg").get_parameter_value().double_value)
+            self._linear_hfov_rad = math.radians(hfov_deg) if hfov_deg > 0.0 else None
+            yaw_deg = float(
+                self.get_parameter("person_azimuth_linear_camera_yaw_deg").get_parameter_value().double_value
             )
+            self._linear_camera_yaw_rad = math.radians(yaw_deg)
+            self._linear_use_mask = bool(
+                self.get_parameter("person_azimuth_linear_use_mask").get_parameter_value().bool_value
+            )
+            if self._azimuth_mode == "tf_geometry":
+                self._tf_buffer = tf2_ros.Buffer()
+                self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self, spin_thread=True)
+            else:
+                self._tf_buffer = None
+                self._tf_listener = None
+            self.create_subscription(CameraInfo, ci_topic, self._on_cam_info, qos)
+            az_topic = self.get_parameter("person_azimuth_topic").get_parameter_value().string_value
+            self._pub_azimuth = self.create_publisher(JointState, az_topic, 10)
+            _mode_desc = (
+                "linear_fov（框宽占比×水平视场，无 TF）"
+                if self._azimuth_mode == "linear_fov"
+                else "tf_geometry（内参+TF+地面）"
+            )
+            self.get_logger().info(
+                f"人物方位角: {az_topic}（JointState；模式: {_mode_desc}；CameraInfo: {ci_topic}）"
+            )
+            if self.get_parameter("publish_azimuth_debug").get_parameter_value().bool_value:
+                dbg_t = self.get_parameter("azimuth_debug_topic").get_parameter_value().string_value
+                self._pub_az_dbg = self.create_publisher(String, dbg_t, 10)
+                self.get_logger().info(
+                    f"方位角调试字符串: {dbg_t}（ros2 topic echo；与 markers 共用话题则两行交替出现）"
+                )
+            self._log_az_console = bool(
+                self.get_parameter("log_person_azimuth_to_console").get_parameter_value().bool_value
+            )
+            self._log_az_interval = max(
+                0.0, float(self.get_parameter("log_person_azimuth_interval_sec").get_parameter_value().double_value)
+            )
+            if self._log_az_console:
+                _iv = self._log_az_interval
+                _iv_txt = f"{_iv:g} 秒" if _iv > 0.0 else "每一推理帧（输出很密）"
+                self.get_logger().info(
+                    f"人物方位角命令行输出: 间隔 {_iv_txt}（log_person_azimuth_to_console / log_person_azimuth_interval_sec）"
+                )
 
         self.create_subscription(Image, in_topic, self._on_image, qos)
         self.get_logger().info(
@@ -250,7 +314,14 @@ class YoloPersonSegNode(Node):
         n_p, mx_c = self._person_count_and_max_conf(results)
         self._publish_detection_stats(n_p, mx_c)
         boxes = results[0].boxes if results else None
-        self._publish_person_azimuths(msg, boxes, n_p)
+        masks_xy = None
+        if results and results[0].masks is not None:
+            try:
+                masks_xy = results[0].masks.xy
+            except Exception:
+                masks_xy = None
+        image_wh = (int(img.shape[1]), int(img.shape[0]))
+        self._publish_person_azimuths(msg, boxes, n_p, image_wh=image_wh, masks_xy=masks_xy)
         if not results:
             return
         annotated = results[0].plot()
@@ -262,7 +333,35 @@ class YoloPersonSegNode(Node):
         out.header = msg.header
         self._pub.publish(out)
 
-    def _publish_person_azimuths(self, image_msg: Image, boxes: Any, n_person: int) -> None:
+    def _publish_azimuth_debug_str(self, js: JointState, reason: str) -> None:
+        data = list(js.position)
+        n = len(data) // 2
+        deg_chunks: list[str] = []
+        for i in range(0, len(data) - 1, 2):
+            lo, hi = float(data[i]), float(data[i + 1])
+            deg_chunks.append(f"{math.degrees(norm_angle(lo)):.1f}~{math.degrees(norm_angle(hi)):.1f}°")
+        ci_ok = self._cam_info is not None
+        line = (
+            f"[人物方位角] {reason} laser={self._laser_frame} pairs={n} "
+            f"cam_info={'ok' if ci_ok else 'MISSING'} "
+            f"deg=[{', '.join(deg_chunks)}] rad={data!r}"
+        )
+        if self._pub_az_dbg is not None:
+            self._pub_az_dbg.publish(String(data=line))
+        if self._log_az_console:
+            now = time.monotonic()
+            if self._log_az_interval <= 0.0 or (now - self._last_azimuth_console_mono) >= self._log_az_interval:
+                self._last_azimuth_console_mono = now
+                self.get_logger().info(line)
+
+    def _publish_person_azimuths(
+        self,
+        image_msg: Image,
+        boxes: Any,
+        n_person: int,
+        image_wh: tuple[int, int] | None = None,
+        masks_xy: list[Any] | None = None,
+    ) -> None:
         if self._pub_azimuth is None:
             return
         js = JointState()
@@ -271,16 +370,19 @@ class YoloPersonSegNode(Node):
         if n_person == 0 or boxes is None or len(boxes) == 0:
             js.position = []
             self._pub_azimuth.publish(js)
+            self._publish_azimuth_debug_str(js, "no_person_boxes")
             return
-        if self._cam_info is None:
+        if self._azimuth_mode != "linear_fov" and self._cam_info is None:
             now = time.monotonic()
             if now - self._last_cam_warn_mono > 5.0:
                 self._last_cam_warn_mono = now
-                self.get_logger().warning("尚未收到 CameraInfo，无法发布 person_azimuth_ranges")
+                self.get_logger().warning("尚未收到 CameraInfo，无法发布 person_azimuth_ranges（tf_geometry 模式必需）")
             js.position = []
             self._pub_azimuth.publish(js)
+            self._publish_azimuth_debug_str(js, "no_camera_info")
             return
-        assert self._tf_buffer is not None
+        if self._azimuth_mode == "tf_geometry" and self._tf_buffer is None:
+            return
         from human_yolo_seg.person_azimuth import boxes_to_azimuth_data
 
         data = boxes_to_azimuth_data(
@@ -291,9 +393,17 @@ class YoloPersonSegNode(Node):
             self._laser_frame,
             self._ground_frame,
             self.get_logger(),
+            image_wh=image_wh,
+            masks_xy=masks_xy,
+            mode=self._azimuth_mode,
+            linear_hfov_rad=self._linear_hfov_rad,
+            linear_camera_yaw_rad=self._linear_camera_yaw_rad,
+            linear_use_mask=self._linear_use_mask,
         )
         js.position = [float(x) for x in data]
         self._pub_azimuth.publish(js)
+        _reason = "ok_linear_fov" if self._azimuth_mode == "linear_fov" else "ok_tf_geometry"
+        self._publish_azimuth_debug_str(js, _reason)
 
 
 def main() -> None:
