@@ -224,7 +224,7 @@ Visualization Manager:
       Value: true
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
-      Name: 人物方位角（绿扇形+黄字角度，看 3D 窗非 Image）
+      Name: 人物方位角（绿圆弧，base_scan 半径 R）
       Topic:
         Depth: 10
         Durability Policy: Volatile

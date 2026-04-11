@@ -156,6 +156,7 @@ cleanup_old() {
   pkill -9 -f point_cloud_xyz_node 2>/dev/null || true
   pkill -9 -f pointcloud_to_laserscan_node 2>/dev/null || true
   pkill -9 -f yolo_person_seg_node 2>/dev/null || true
+  pkill -9 -f person_azimuth_markers_node 2>/dev/null || true
   pkill -9 -f scan_person_filter_node 2>/dev/null || true
   pkill -9 -f person_strip_recorder_node 2>/dev/null || true
   pkill -9 -f scan_map_colored_cloud_node 2>/dev/null || true
@@ -479,7 +480,7 @@ Visualization Manager:
       Value: true
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
-      Name: 人物方位角（绿扇形+黄字角度，看 3D 窗）
+      Name: 人物方位角（绿圆弧）
       Topic:
         Depth: 10
         Durability Policy: Volatile
