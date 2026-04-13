@@ -38,7 +38,7 @@ saved_maps/              可自行存放导出的地图（大文件默认 .gitig
 ros_ws/src/
   robot_bringup/         launch、world、地图、配置（见包内 README）
   robot_navigation/      运动与覆盖巡航（节点说明见 robot_navigation/README.md）
-  human_yolo_seg/        YOLO 与人物–激光链（见包内 README）
+  human_yolo_seg/        YOLO 与人物–激光链；`models/*.pt` 权重需自备、不入库（见包内 README）
   robot_interfaces/      预留
   robot_tasks/           预留
 ```
@@ -58,7 +58,21 @@ source /opt/ros/humble/setup.bash
 colcon build
 source install/setup.bash
 cd ..
+```
 
+**YOLO 权重（仓库不包含）**：若走人物链，需自行准备 Ultralytics 分割权重（如 `yolo26n-seg.pt`），放到 `ros_ws/src/human_yolo_seg/models/`，或通过节点参数 `model_path` 指向本机绝对路径；默认文件名见 [human_yolo_seg/README.md](ros_ws/src/human_yolo_seg/README.md)。
+
+**YOLO 的 Python 依赖（`setup_env.sh` 不会装）**：`human_yolo_seg` 需要 **与当前 `ros2` 相同的 `python3`** 安装依赖，否则 YOLO 节点起不来、RViz 里永远没有 `/human_yolo/annotated_image`。在已 `source /opt/ros/humble/setup.bash` 的终端执行：
+
+```bash
+python3 -m pip install -r ros_ws/src/human_yolo_seg/requirements.txt
+```
+
+（NumPy 版本与 `cv_bridge` 兼容性见该文件内注释；勿用另一个 Python 环境装完就算。）
+
+**RViz 里看不到 YOLO 画面时**：默认配置 `robot_bringup/config/test1.rviz` 已启用 **Image → `/human_yolo/annotated_image`**。若你用的是自己保存过的旧 RViz 配置，到左侧 **Displays** 勾选 **「YOLO (/human_yolo/annotated_image)」**。另请确认未设 **`TB3_NO_GUI=1` / `TB3_HEADLESS=1`**（无界面模式不启 RViz），且 **`TB3_ASSIST_SCAN_FILTER=1`**（默认即为 1）并已 **`colcon build` 出 `human_yolo_seg`**。仍无发布者时在仓库根执行 **`bash scripts/tb3_stack.sh check`**，或 **`bash scripts/tb3_stack.sh logs yolo`** 看 `yolo_person_seg.log`。
+
+```bash
 TB3_STACK_MODE=assist TB3_ASSIST_SCAN_FILTER=1 bash scripts/tb3_stack.sh start
 ```
 
