@@ -20,3 +20,6 @@ ros_ws/saved_maps/
 
 # 临时/本机 SDF
 model_in.sdf
+
+
+/ros_ws/src/robot_bringup/models

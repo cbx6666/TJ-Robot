@@ -108,11 +108,11 @@ fi
 # wait_for_service / wait_for_topic / wait_for_set_entity_state 里每次探测的间隔（秒）；过小会增加 ros2 CLI 调用频率
 TB3_WAIT_POLL_SEC="${TB3_WAIT_POLL_SEC:-0.5}"
 
-WORLD_FILE="${WORLD_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/world/test1.world}"
+WORLD_FILE="${WORLD_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/world/small_house.world}"
 MODEL_FILE="${MODEL_FILE:-/opt/ros/humble/share/turtlebot3_gazebo/models/turtlebot3_${TURTLEBOT3_MODEL}/model.sdf}"
 URDF_FILE="${URDF_FILE:-/tmp/tb3_${TURTLEBOT3_MODEL}.urdf}"
-MAP_PGM_FILE="${MAP_PGM_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/maps/test1.pgm}"
-MAP_YAML_FILE="${MAP_YAML_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/maps/test1.yaml}"
+MAP_PGM_FILE="${MAP_PGM_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/maps/map.pgm}"
+MAP_YAML_FILE="${MAP_YAML_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/maps/map.yaml}"
 LOG_DIR="${TB3_LOG_DIR}"
 RVIZ_CONFIG_FILE="${RVIZ_CONFIG_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/config/test1.rviz}"
 ROBOT_START_X="${ROBOT_START_X:--2.0}"
@@ -1319,9 +1319,9 @@ Environment:
   （已弃用）SLAM_SENSOR=rgbd 等价于 TB3_STACK_MODE=assist（主建图仍为激光）
   TB3_GAZEBO_HARDWARE_GL=1  跳过 LIBGL_ALWAYS_SOFTWARE（真机 GPU；WSL 勿设，避免 RenderEngine 崩溃）
   RVIZ_CONFIG_FILE=<path>  RViz config path (default: robot_bringup/config/test1.rviz)
-  WORLD_FILE=<path>   Gazebo world file override (default: robot_bringup/world/test1.world)
-  MAP_PGM_FILE=<path>  Static map image path for map server or nav stack (default: robot_bringup/maps/test1.pgm)
-  MAP_YAML_FILE=<path> Static map yaml path (default: robot_bringup/maps/test1.yaml)
+  WORLD_FILE=<path>   Gazebo world file override (default: robot_bringup/world/small_house.world)
+  MAP_PGM_FILE=<path>  Static map image path for map server or nav stack (default: robot_bringup/maps/map.pgm)
+  MAP_YAML_FILE=<path> Static map yaml path (default: robot_bringup/maps/map.yaml)
   ROBOT_START_X=-2.0  Robot spawn x in Gazebo world
   ROBOT_START_Y=-1.2  Robot spawn y in Gazebo world
   ROBOT_START_Z=0.1   Robot spawn z in Gazebo world
