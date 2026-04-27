@@ -11,10 +11,7 @@ if(ROBOT_INTERFACES_ENABLE_ROSIDL)
     "msg/TaskStatus.msg"
     "msg/VoiceCommand.msg"
     "msg/TaskGoal.msg"
-    "msg/PersonRegion.msg"
-    "msg/PersonRegionArray.msg"
     "srv/ManipulationCommand.srv"
-    "srv/NavigationCommand.srv"
     DEPENDENCIES builtin_interfaces
   )
   ament_export_dependencies(rosidl_default_runtime)

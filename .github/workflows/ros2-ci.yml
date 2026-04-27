@@ -30,12 +30,12 @@ jobs:
         run: |
           source /opt/ros/humble/setup.bash
           cd ros_ws
-          colcon build --event-handlers console_direct+ --packages-up-to robot_bringup robot_navigation human_yolo_seg robot_tasks robot_interfaces robot_interaction robot_manipulation --cmake-args -DROBOT_INTERFACES_ENABLE_ROSIDL=ON
+          colcon build --event-handlers console_direct+ --packages-up-to robot_bringup human_yolo_seg robot_tasks robot_interfaces robot_interaction robot_manipulation --cmake-args -DROBOT_INTERFACES_ENABLE_ROSIDL=ON
 
       - name: Test (selected packages)
         shell: bash
         run: |
           source /opt/ros/humble/setup.bash
           cd ros_ws
-          colcon test --event-handlers console_direct+ --packages-select robot_navigation robot_tasks
+          colcon test --event-handlers console_direct+ --packages-select robot_tasks
           colcon test-result --verbose

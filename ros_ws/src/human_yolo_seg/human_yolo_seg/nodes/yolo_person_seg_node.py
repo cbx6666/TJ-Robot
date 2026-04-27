@@ -97,7 +97,7 @@ class YoloPersonSegNode(Node):
         self.declare_parameter("publish_detection_stats", True)
         self.declare_parameter("stats_topic_prefix", "/human_yolo")
         self.declare_parameter("camera_info_topic", "/camera/camera_info")
-        self.declare_parameter("publish_person_azimuths", True)
+        self.declare_parameter("publish_person_azimuths", False)
         self.declare_parameter("person_azimuth_topic", "/human_yolo/person_azimuth_ranges")
         self.declare_parameter("laser_frame_id", "base_scan")
         self.declare_parameter("ground_frame_id", "base_footprint")

@@ -1,13 +1,9 @@
 project:
   ros_workspace: ros_ws
   ros_src: ros_ws/src
-  nav2_base_params: ros_ws/src/robot_bringup/config/nav2/base.yaml
-  nav2_profile_coverage: ros_ws/src/robot_bringup/config/nav2/profiles/coverage_patrol.yaml
-  nav2_profile_conservative: ros_ws/src/robot_bringup/config/nav2/profiles/conservative.yaml
 
 packages:
   bringup: robot_bringup
-  navigation: robot_navigation
   perception: human_yolo_seg
   tasks: robot_tasks
   interaction: robot_interaction
@@ -17,16 +13,10 @@ packages:
 configs:
   voice: config/interaction/voice.yaml
   llm_orchestration: config/llm/orchestration.yaml
-  navigation_mapping: config/navigation/mapping_navigation.yaml
-  navigation_postmap: config/navigation/postmap_navigation.yaml
   mock_manipulation: config/manipulation/mock_arm.yaml
 
 data:
   root: data
-  maps_baseline_raw: data/maps/baseline_raw
-  maps_semantic_pre_strip: data/maps/semantic_pre_strip
-  maps_semantic_post_strip: data/maps/semantic_post_strip
-  maps_semantic_overlays: data/maps/semantic_overlays
   logs: data/logs
   results: data/results
   datasets: data/datasets

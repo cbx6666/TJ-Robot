@@ -13,26 +13,15 @@
 - Pure utilities / reusable logic: `<pkg>/<pkg>/utils`
 - Runtime parameters: `robot_bringup/config/*`
 
-## Nav2 Config Layering
+## RGBD + YOLO Focus
 
-Use layered config files instead of one giant YAML:
-
-- Base: `ros_ws/src/robot_bringup/config/nav2/base.yaml`
-- Profile overrides: `ros_ws/src/robot_bringup/config/nav2/profiles/*.yaml`
-
-Launch accepts:
-
-- `nav2_base_params`
-- `nav2_profile_params`
+- This stage keeps RGBD robot simulation and YOLO recognition.
+- Legacy mapping/navigation flows (SLAM/Nav2/coverage patrol) are removed from active runtime paths.
 
 ## Data Outputs
 
-Generated maps/logs/results belong to `data/`:
+Generated logs/results belong to `data/`:
 
-- `data/maps/baseline_raw`
-- `data/maps/semantic_pre_strip`
-- `data/maps/semantic_post_strip`
-- `data/maps/semantic_overlays`
 - `data/logs`
 - `data/results`
 
@@ -45,8 +34,8 @@ Generated maps/logs/results belong to `data/`:
 ```bash
 cd ros_ws
 source /opt/ros/humble/setup.bash
-colcon build --packages-up-to robot_bringup robot_navigation human_yolo_seg robot_tasks robot_interfaces robot_interaction robot_manipulation
-colcon test --packages-select robot_navigation robot_tasks
+colcon build --packages-up-to robot_bringup human_yolo_seg robot_tasks robot_interfaces robot_interaction robot_manipulation
+colcon test --packages-select robot_tasks
 colcon test-result --verbose
 ```
 
