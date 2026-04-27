@@ -119,6 +119,16 @@ ros2 run robot_navigation coverage_patrol --ros-args \
   -p save_map_on_complete:=true
 ```
 
+**同时**要叠加示意图 + **清障后栅格图**（`mark_then_strip` 流程）可加上（需主栈已起 YOLO + `person_strip_recorder`）：
+
+```bash
+ros2 run robot_navigation coverage_patrol --ros-args \
+  -p use_sim_time:=true \
+  -p save_map_on_complete:=true \
+  -p post_save_person_overlay:=true \
+  -p post_save_strip_person_free:=true
+```
+
 或：
 
 ```bash
@@ -134,38 +144,40 @@ Launch 示例：
 ```bash
 ros2 launch robot_bringup coverage_patrol.launch.py \
   save_map_on_complete:=true \
-  save_map_directory:=/绝对路径/TJ-Robot/saved_maps
+  save_map_directory:=/绝对路径/TJ-Robot/data/maps/semantic_pre_strip
 ```
 
 相关参数：
 
 - `save_map_on_complete`：是否在覆盖路径全部走完后保存地图（默认 `false`）。
-- `save_map_directory`：保存目录；为空则用环境变量 `TJ_ROBOT_SAVED_MAPS_DIR`，再否则为**当前工作目录**下的 `saved_maps/`（会自动创建）。
+- `save_map_directory`：保存目录；为空则用环境变量 `TJ_ROBOT_SAVED_MAPS_DIR`，再否则为**当前工作目录**下的 `saved_maps/`（会自动创建，建议通过环境变量统一到 `data/maps/...`）。
 - `save_map_basename`：文件名前缀；为空则自动生成带时间戳的名字（`coverage_map_YYYYMMDD_HHMMSS`）。
 - `save_map_delay_sec`：路线完成后延迟多少秒再调用 `map_saver_cli`（默认 `2.0`）。
 - `exit_after_map_save`：保存后是否退出节点（默认 `true`，便于脚本批处理）。
-- `post_save_person_overlay`：存图成功后是否再生成 **彩色 PNG**（`human_yolo_seg`），把 `person_strip_recorder` 记录的 map 系人物圆叠在 SLAM 灰度图上，便于核对 YOLO+激光 与地图是否对齐（默认 `false`；需已 `colcon build human_yolo_seg`）。
+- `post_save_person_overlay`：存图成功后是否生成 **一张** **`*_gray_person_composite.png`**（浅灰底 + 洋红/粉色实心人点；与手动 `--composite-only` 一致；默认 `false`；需已 `colcon build human_yolo_seg`）。若还需要半透明圆 + 黄十字版 **`*_person_overlay.png`**，可手动运行 `annotate_saved_map_person_overlay`（底图默认已提亮，过亮可用 `--overlay-no-brighten`）。
+- `post_save_strip_person_free`：存图成功后是否再调用 **`strip_saved_map_person_free`**，在同目录生成 **`*_person_free.pgm` + `*_person_free.yaml`**（把人物区域圆刷成空闲；默认 `false`）。人物区域 YAML 的解析规则与 overlay **相同**（`person_regions_yaml` 或点云快照）。仅开此项、不开 `post_save_person_overlay` 时也会按需做点云快照。
+- `strip_saved_map_no_flip_y`：为 `true` 时给清障命令加 **`--no-flip-y`**（与叠加图圆错位时尝试的约定一致）。
 - `person_regions_yaml`：人物区域文件路径（默认 `~/.ros/tj_person_strip_regions.yaml`）；与 `person_strip_recorder` 的 `output_path` 一致。
-- `snapshot_overlay_from_cloud_if_no_regions`（默认 `true`）：当上述 YAML **不存在**时，是否调用 `snapshot_person_regions_from_cloud`，从 **`/human_yolo/person_laser_map_cloud`**（与 RViz 里 PointCloud2 叠在 `map` 上、**Transient Local** 保留最近一帧）生成与地图同目录的 **`*_person_regions_snapshot.yaml`** 再画叠加图。若仿真全程**从未**起过 `person_strip_recorder`（无人发布该点云），快照会得到 **空 regions**，叠加图里人数为 0——此时仍需按栈说明起 YOLO+`person_strip_recorder`。
+- `snapshot_overlay_from_cloud_if_no_regions`（默认 `true`）：当上述 YAML **不存在**时，是否调用 `snapshot_person_regions_from_cloud`，从 **`/human_yolo/person_laser_map_cloud`**（与 RViz 里 PointCloud2 叠在 `map` 上、**Transient Local** 保留最近一帧）生成与地图同目录的 **`*_person_regions_snapshot.yaml`**，供 overlay / strip 使用。若仿真全程**从未**起过 `person_strip_recorder`（无人发布该点云），快照会得到 **空 regions**，清障与叠加无效——此时仍需按栈说明起 YOLO+`person_strip_recorder`。
 - `person_laser_map_cloud_topic`：快照订阅的话题（默认 `/human_yolo/person_laser_map_cloud`）。
 
 **仿真运行时能在 RViz 里看吗？**  
-**`*_person_overlay.png` 不能**——它只在**存图之后**由离线命令生成，仿真过程中 RViz 里不会出现这张图。  
+**`*_gray_person_composite.png` / `*_person_overlay.png`** 只在**存图之后**由工具生成，仿真过程中 RViz 里不会出现。  
 **默认精简显示**：RViz 开 **`/human_yolo/person_laser_map_cloud`**（**mark_then_strip** 下 `person_strip_recorder` 的 map 系人向点）+ **`/human_yolo/person_azimuth_markers`**（方位角扇形）。  
 要看 **整帧激光在 map 上、人物束换色**（可设 Decay 拖尾），需 **`TB3_ENABLE_SCAN_MAP_COLORED=1`** 或 launch **`enable_scan_map_colored:=true`**，话题 **`/human_yolo/scan_map_colored_cloud`**（**PointCloud2 + RGB8**）。  
 **`filtered`** 模式无 strip 累积点云；要看 `map` 上人向可开上述彩色整帧，或改用 **mark_then_strip**。
 
-**说明**：`map_saver_cli` 输出的 **PGM 只有占用/空闲灰度**，不会带颜色；人物是否「从图里擦掉」取决于你是否再跑 `strip_saved_map_person_free`（把人物区刷成空闲）。要看「YOLO 认为人在哪」，请打开同目录下的 **`*_person_overlay.png`**（存图后），或手动：
+**说明**：`map_saver_cli` 输出的 **PGM 只有占用/空闲灰度**，不会带颜色；人物是否「从图里擦掉」取决于是否 **`post_save_strip_person_free:=true`**（自动生成 `*_person_free.*`），或存图后**手动**执行 `strip_saved_map_person_free`。要看「YOLO 认为人在哪」，请打开同目录下的 **`*_gray_person_composite.png`**（`post_save_person_overlay` 默认即此），或手动：
 
 ```bash
 ros2 run human_yolo_seg annotate_saved_map_person_overlay \\
-  saved_maps/你的图.yaml ~/.ros/tj_person_strip_regions.yaml
+  data/maps/semantic_pre_strip/你的图.yaml ~/.ros/tj_person_strip_regions.yaml
 ```
 
 若圆整体偏一格，可对叠加命令加 `--no-flip-y` 试与 `strip_saved_map_person_free --no-flip-y` 相同约定。  
-加 **`--also-composite`** 会另存 **`*_gray_person_composite.png`**（灰度 SLAM 图转彩底 + 人物色实心小点）；`coverage_patrol` 的 `post_save_person_overlay` 已默认带上该选项。
+需要**同时**要半透明叠图 **`*_person_overlay.png`** 时，可手动运行（不加 `--composite-only`）；可加 **`--also-composite`** 在一张命令里两种都出。`person_overlay` 底图默认 **提亮**（占栅 PGM 偏暗时更明显），要旧版偏暗效果加 **`--overlay-no-brighten`**。
 
-地图文件为 `.pgm` + `.yaml`，位于上述目录；仓库 `.gitignore` 默认忽略 `saved_maps/*.pgm` 与 `*.yaml`，需要提交时请自行 `git add -f`。
+地图文件为 `.pgm` + `.yaml`，位于上述目录；仓库 `.gitignore` 默认忽略 `data/maps/*` 下生成文件，需要提交时请自行 `git add -f`。
 
 ### 常用参数
 

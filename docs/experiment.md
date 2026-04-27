@@ -10,7 +10,7 @@
 Gazebo/TurtleBot3
 -> SLAM Toolbox
 -> map_saver
--> data/maps/raw
+-> data/maps/baseline_raw
 -> data/logs/baseline_mapping
 -> data/results
 ```
@@ -19,7 +19,7 @@ Gazebo/TurtleBot3
 
 ```bash
 bash scripts/run_baseline_mapping.sh
-bash scripts/save_map.sh raw
+bash scripts/save_map.sh baseline_raw
 ```
 
 ## semantic mapping
@@ -43,26 +43,26 @@ Gazebo/TurtleBot3
 
 ```bash
 bash scripts/run_semantic_mapping.sh
-bash scripts/save_map.sh before_strip
-bash scripts/strip_map.sh data/maps/before_strip/map_xxx.yaml ~/.ros/tj_person_strip_regions.yaml
+bash scripts/save_map.sh semantic_pre_strip
+bash scripts/strip_map.sh data/maps/semantic_pre_strip/map_xxx.yaml ~/.ros/tj_person_strip_regions.yaml
 ```
 
-## before_strip
+## semantic_pre_strip
 
-`before_strip` 是语义实验的原始 SLAM 地图，保存到：
+`semantic_pre_strip` 是语义实验的原始 SLAM 地图，保存到：
 
 ```text
-data/maps/before_strip
+data/maps/semantic_pre_strip
 ```
 
 它应和实验参数、YOLO 模型、person region 文件一起记录。
 
-## after_strip
+## semantic_post_strip
 
-`after_strip` 是后处理输出，保存到：
+`semantic_post_strip` 是后处理输出，保存到：
 
 ```text
-data/maps/after_strip
+data/maps/semantic_post_strip
 ```
 
 输出包括 `.yaml` 和 `.pgm`。后续可加入 strip report。

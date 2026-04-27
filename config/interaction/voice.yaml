@@ -1,0 +1,12 @@
+voice:
+  input_topic: /interaction/voice_text
+  locale: zh-CN
+  mode: api_or_mock
+  api:
+    url: ""
+    api_key_env: VOICE_API_KEY
+    timeout_sec: 8
+  mock:
+    enabled: true
+    interval_sec: 8
+    sample_text: 去客厅拿杯子

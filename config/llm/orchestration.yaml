@@ -1,0 +1,13 @@
+llm:
+  input_topic: /interaction/voice_text
+  plan_topic: /interaction/llm_plan_text
+  task_goal_topic: /task/goal_text
+  api:
+    url: ""
+    api_key_env: LLM_API_KEY
+    model: gpt-4o-mini
+    temperature: 0.2
+    timeout_sec: 20
+  prompts:
+    system_prompt_file: config/llm/system_prompt.txt
+    tool_schema_file: config/llm/tool_schema.yaml

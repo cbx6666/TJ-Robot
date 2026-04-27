@@ -30,10 +30,10 @@ source_workspace_if_available() {
 
 prepare_output_dirs() {
   mkdir -p \
-    "${PROJECT_ROOT}/data/maps/raw" \
-    "${PROJECT_ROOT}/data/maps/before_strip" \
-    "${PROJECT_ROOT}/data/maps/after_strip" \
-    "${PROJECT_ROOT}/data/maps/semantic" \
+    "${PROJECT_ROOT}/data/maps/baseline_raw" \
+    "${PROJECT_ROOT}/data/maps/semantic_pre_strip" \
+    "${PROJECT_ROOT}/data/maps/semantic_post_strip" \
+    "${PROJECT_ROOT}/data/maps/semantic_overlays" \
     "${PROJECT_ROOT}/data/logs" \
     "${PROJECT_ROOT}/data/results"
 }

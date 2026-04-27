@@ -41,6 +41,16 @@ def generate_launch_description():
         DeclareLaunchArgument('map_topic', default_value='/map'),
         DeclareLaunchArgument('post_save_person_overlay', default_value='false'),
         DeclareLaunchArgument(
+            'post_save_strip_person_free',
+            default_value='false',
+            description='存图后运行 strip_saved_map_person_free，生成 *_person_free.pgm/.yaml',
+        ),
+        DeclareLaunchArgument(
+            'strip_saved_map_no_flip_y',
+            default_value='false',
+            description='传给 strip_saved_map_person_free 的 --no-flip-y（圆错位时可试 true）',
+        ),
+        DeclareLaunchArgument(
             'person_regions_yaml',
             default_value='',
             description='人物区域 YAML；空则 ~/.ros/tj_person_strip_regions.yaml',
@@ -111,6 +121,12 @@ def generate_launch_description():
                 'map_topic': LaunchConfiguration('map_topic'),
                 'post_save_person_overlay': ParameterValue(
                     LaunchConfiguration('post_save_person_overlay'), value_type=str
+                ),
+                'post_save_strip_person_free': ParameterValue(
+                    LaunchConfiguration('post_save_strip_person_free'), value_type=str
+                ),
+                'strip_saved_map_no_flip_y': ParameterValue(
+                    LaunchConfiguration('strip_saved_map_no_flip_y'), value_type=str
                 ),
                 'person_regions_yaml': LaunchConfiguration('person_regions_yaml'),
                 'snapshot_overlay_from_cloud_if_no_regions': ParameterValue(

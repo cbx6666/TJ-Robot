@@ -2,10 +2,10 @@
 
 Generated maps, logs, results, datasets, and recordings live here.
 
-- `maps/raw`: baseline or unprocessed saved maps.
-- `maps/before_strip`: semantic mapping maps before person-region stripping.
-- `maps/after_strip`: maps after strip post-processing.
-- `maps/semantic`: semantic overlays and future semantic map products.
+- `maps/baseline_raw`: baseline or unprocessed saved maps.
+- `maps/semantic_pre_strip`: semantic mapping maps before person-region stripping.
+- `maps/semantic_post_strip`: maps after strip post-processing.
+- `maps/semantic_overlays`: semantic overlays and composite visual outputs.
 - `logs`: runtime logs from scripts and experiments.
 - `results`: metrics and experiment reports.
 - `datasets`: reusable offline inputs.

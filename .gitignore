@@ -16,18 +16,18 @@ model_in.sdf
 /ros_ws/src/robot_bringup/models
 
 # System outputs
-data/maps/raw/*
-data/maps/before_strip/*
-data/maps/after_strip/*
-data/maps/semantic/*
+data/maps/baseline_raw/*
+data/maps/semantic_pre_strip/*
+data/maps/semantic_post_strip/*
+data/maps/semantic_overlays/*
 data/logs/*
 data/results/*
 data/datasets/*
 data/recordings/*
-!data/maps/raw/.gitkeep
-!data/maps/before_strip/.gitkeep
-!data/maps/after_strip/.gitkeep
-!data/maps/semantic/.gitkeep
+!data/maps/baseline_raw/.gitkeep
+!data/maps/semantic_pre_strip/.gitkeep
+!data/maps/semantic_post_strip/.gitkeep
+!data/maps/semantic_overlays/.gitkeep
 !data/logs/.gitkeep
 !data/results/.gitkeep
 !data/datasets/.gitkeep

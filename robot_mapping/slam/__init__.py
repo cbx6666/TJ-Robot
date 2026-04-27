@@ -1,1 +1,0 @@
-"""SLAM mapping adapters."""

@@ -46,10 +46,10 @@ bash scripts/run_baseline_mapping.sh
 保存地图：
 
 ```bash
-bash scripts/save_map.sh raw
+bash scripts/save_map.sh baseline_raw
 ```
 
-输出到 `data/maps/raw`。
+输出到 `data/maps/baseline_raw`。
 
 ## semantic mapping
 
@@ -60,7 +60,7 @@ bash scripts/run_semantic_mapping.sh
 保存 strip 前地图：
 
 ```bash
-bash scripts/save_map.sh before_strip
+bash scripts/save_map.sh semantic_pre_strip
 ```
 
 人物区域默认来自：
@@ -73,17 +73,24 @@ bash scripts/save_map.sh before_strip
 
 ```bash
 bash scripts/strip_map.sh \
-  data/maps/before_strip/map_xxx.yaml \
+  data/maps/semantic_pre_strip/map_xxx.yaml \
   ~/.ros/tj_person_strip_regions.yaml
 ```
 
-输出到 `data/maps/after_strip`。
+输出到 `data/maps/semantic_post_strip`。
 
 ## 启动导航
 
 先保证仿真、TF、`/map`、`/scan` 正常，再运行：
 
 ```bash
+bash scripts/run_navigation.sh
+```
+
+若需切换 Nav2 参数 profile（如更保守避障）：
+
+```bash
+export TJ_NAV2_PROFILE_PARAMS=ros_ws/src/robot_bringup/config/nav2/profiles/conservative.yaml
 bash scripts/run_navigation.sh
 ```
 

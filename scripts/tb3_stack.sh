@@ -27,8 +27,8 @@ else
   echo "         否则 robot_bringup 的 launch 不可用。" >&2
 fi
 
-# 运行模式：laser=默认 burger | assist=默认 burger（RGB+YOLO 链与项目基线一致）；显式 waffle/waffle_pi 可注入深度
-TB3_STACK_MODE="${TB3_STACK_MODE:-laser}"
+# 运行模式：laser=仅激光 | assist=RGBD+激光（默认）
+TB3_STACK_MODE="${TB3_STACK_MODE:-assist}"
 RGBD_DEPTH_IMAGE_TOPIC="${RGBD_DEPTH_IMAGE_TOPIC:-/tb3_depth_only/depth/image_raw}"
 RGBD_DEPTH_CAMERA_INFO_TOPIC="${RGBD_DEPTH_CAMERA_INFO_TOPIC:-/tb3_depth_only/depth/camera_info}"
 YOLO_IMAGE_TOPIC="${YOLO_IMAGE_TOPIC:-/camera/image_raw}"
@@ -56,8 +56,8 @@ fi
 
 if [[ "${TB3_STACK_MODE}" == "assist" ]]; then
   if [[ -z "${TURTLEBOT3_MODEL:-}" ]]; then
-    export TURTLEBOT3_MODEL="burger"
-    echo "TB3_STACK_MODE=assist：未指定 TURTLEBOT3_MODEL，默认 burger（RGB+激光/YOLO 链；无深度注入，需深度请设 waffle）" >&2
+    export TURTLEBOT3_MODEL="waffle"
+    echo "TB3_STACK_MODE=assist：未指定 TURTLEBOT3_MODEL，默认 waffle（RGBD+激光）" >&2
   elif [[ "${TURTLEBOT3_MODEL}" != "waffle" && "${TURTLEBOT3_MODEL}" != "waffle_pi" && "${TURTLEBOT3_MODEL}" != "burger" ]]; then
     export TURTLEBOT3_MODEL="burger"
     echo "TB3_STACK_MODE=assist：不支持的模型，已改为 burger" >&2
@@ -1299,7 +1299,7 @@ Usage:
   bash scripts/tb3_stack.sh logs [all|gzserver|gzclient|rviz|rsp|slam|robot_description|spawn|obstacle|rgbd|yolo|yolo_map_pipeline|strip_recorder|scan_filter|scan_map_colored]
 
 Environment:
-  TB3_STACK_MODE=laser|assist  laser=默认 burger；assist 未指定模型时=burger（RGB、无深度注入）；需深度请 TURTLEBOT3_MODEL=waffle|waffle_pi
+  TB3_STACK_MODE=laser|assist  默认 assist（RGBD+激光）；laser 用于仅激光建图
   TB3_ASSIST_SCAN_FILTER=0|1  默认 1：若已 build human_yolo_seg，则 ros2 launch yolo_person_seg（YOLO + strip|filter + 方位角 Marker；整帧 map 上色见 TB3_ENABLE_SCAN_MAP_COLORED）
   TB3_ENABLE_SCAN_MAP_COLORED=0|1  默认 0：为 1 时额外起 scan_map_colored_cloud（整帧激光投 map；filtered 且无 strip 时便于看人向）
   TB3_PERSON_SLAM_MODE=mark_then_strip|filtered  默认 mark_then_strip：SLAM 用 /scan + person_strip_recorder，事后 strip 地图；filtered=旧行为 /scan_filtered 建图
@@ -1315,7 +1315,7 @@ Environment:
   TB3_HEADLESS=1 Same as TB3_NO_GUI=1 (alias for no GUI)
   TB3_START_BENCH=0|1  默认 1：start 时打印 [计时] 分步与总耗时（秒）；0 关闭
   TB3_WAIT_POLL_SEC=0.5  等待 /spawn_entity、/tf_static、/map 等时的轮询间隔（秒）；可略调小以加快就绪检测（略增 CPU）
-  TURTLEBOT3_MODEL=burger|waffle|waffle_pi  laser 与 assist 未指定时均默认 burger；需仿真深度 SDF 时显式 waffle 或 waffle_pi
+  TURTLEBOT3_MODEL=burger|waffle|waffle_pi  assist 未指定时默认 waffle；laser 模式建议 waffle 或 burger
   （已弃用）SLAM_SENSOR=rgbd 等价于 TB3_STACK_MODE=assist（主建图仍为激光）
   TB3_GAZEBO_HARDWARE_GL=1  跳过 LIBGL_ALWAYS_SOFTWARE（真机 GPU；WSL 勿设，避免 RenderEngine 崩溃）
   RVIZ_CONFIG_FILE=<path>  RViz config path (default: robot_bringup/config/test1.rviz)

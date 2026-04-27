@@ -38,7 +38,7 @@
 ### 2.1 软件与硬件
 
 - Ubuntu + ROS 2 Humble
-- Gazebo 世界： `robot_bringup/world/test1.world`
+- Gazebo 世界： `ros_ws/src/robot_bringup/world/test1.world`
 - 机器人：**TurtleBot3 Burger + 仿真 RGB**（`TB3_STACK_MODE=assist`），激光 `/scan`，图像 `/camera/image_raw`。
 - 动态干扰：世界中**移动障碍物/行人脚本**保持开启，且两组实验使用**相同轨迹与速度参数。**
 

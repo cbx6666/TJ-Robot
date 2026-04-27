@@ -7,10 +7,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
 targets=(
-  "${PROJECT_ROOT}/data/maps/raw"
-  "${PROJECT_ROOT}/data/maps/before_strip"
-  "${PROJECT_ROOT}/data/maps/after_strip"
-  "${PROJECT_ROOT}/data/maps/semantic"
+  "${PROJECT_ROOT}/data/maps/baseline_raw"
+  "${PROJECT_ROOT}/data/maps/semantic_pre_strip"
+  "${PROJECT_ROOT}/data/maps/semantic_post_strip"
+  "${PROJECT_ROOT}/data/maps/semantic_overlays"
   "${PROJECT_ROOT}/data/logs"
   "${PROJECT_ROOT}/data/results"
 )

@@ -22,7 +22,7 @@ if [[ $# -ge 3 ]]; then
 else
   stem="$(basename "${map_yaml}")"
   stem="${stem%.yaml}"
-  output_prefix="${PROJECT_ROOT}/data/maps/after_strip/${stem}_person_free"
+  output_prefix="${PROJECT_ROOT}/data/maps/semantic_post_strip/${stem}_person_free"
 fi
 
 echo "Stripping person regions:"

@@ -1,32 +1,23 @@
-# 模块接口设计
+# 模块接口设计（单源版）
 
-## robot_perception
+所有实现与接口以 `ros_ws/src` 下 ROS 包为准。
+
+## `human_yolo_seg`
 
 输入：
 
 - `/scan`
 - `/camera/image_raw`
 - `/camera/camera_info`
-- future audio stream
 
 输出：
 
 - `/human_yolo/annotated_image`
 - `/human_yolo/person_azimuth_ranges`
 - `/human_yolo/person_laser_map_cloud`
-- `/interaction/speech_text`
+- `/scan_filtered`（可选）
 
-YOLO 入口：
-
-- `robot_perception/vision/yolo_detector_node.py`
-- `robot_perception/vision/person_detector_node.py`
-- `robot_perception/vision/object_detector_node.py`
-
-## robot_mapping
-
-SLAM 输入 `/scan` 或 `/scan_filtered`，输出 `/map` 和地图文件。
-
-地图后处理在 `robot_mapping/strip/`：
+地图后处理链路：
 
 ```text
 before_strip map + person regions
@@ -34,49 +25,19 @@ before_strip map + person regions
 -> after_strip map
 ```
 
-人物区域和动态对象语义信息在 `robot_mapping/semantic/`。
+## `robot_navigation`
 
-## robot_navigation
+输入地图、TF、scan 和目标位姿，输出 `/cmd_vel` 与导航状态。
+核心节点在 `ros_ws/src/robot_navigation/robot_navigation/nodes`。
 
-输入地图、TF、scan 和 room/pose goal，输出 `/cmd_vel` 和导航状态。当前真实实现仍主要在 `ros_ws/src/robot_navigation` 包。
+## `robot_tasks`
 
-## robot_interaction
+负责任务编排和状态管理，当前主节点在 `ros_ws/src/robot_tasks/robot_tasks/nodes`。
 
-语音链路：
+## `robot_bringup`
 
-```text
-ASR -> speech_text -> NLU -> RobotTask -> task manager -> TTS/log
-```
+负责系统级 launch 编排、参数与仿真资源，路径为 `ros_ws/src/robot_bringup`。
 
-示例：
+## `robot_interfaces`
 
-```text
-去客厅找杯子
-```
-
-解析为：
-
-```text
-intent = search_object
-target_object = cup
-target_room = living_room
-required_modules = robot_navigation + robot_perception + robot_tasks
-```
-
-## robot_tasks
-
-职责：
-
-- 接收 NLU 或实验脚本产生的任务。
-- 调用 task planner 拆解动作。
-- 分发给导航、感知、建图和地图后处理。
-- 记录任务状态和结果。
-
-## robot_experiments
-
-按实验对象组织：
-
-- `mapping`：baseline 和 semantic mapping。
-- `navigation`：导航成功率、耗时、失败原因。
-- `search`：目标搜索成功率。
-- `metrics`：地图质量和日志工具。
+负责消息/接口定义，供跨包契约扩展使用。

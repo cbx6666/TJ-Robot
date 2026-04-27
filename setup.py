@@ -1,16 +1,9 @@
-from setuptools import find_packages, setup
+from setuptools import setup
 
 
 setup(
-    packages=find_packages(
-        include=[
-            "robot_core*",
-            "robot_perception*",
-            "robot_mapping*",
-            "robot_navigation*",
-            "robot_interaction*",
-            "robot_tasks*",
-            "robot_experiments*",
-        ]
-    ),
+    name="tj-robot-system",
+    version="0.1.0",
+    description="Repository metadata only. Runtime ROS packages live in ros_ws/src.",
+    py_modules=[],
 )

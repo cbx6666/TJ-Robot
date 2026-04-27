@@ -1,0 +1,14 @@
+tools:
+  - name: navigate_to_room
+    args:
+      - target_room
+  - name: search_object
+    args:
+      - object_name
+      - room_hint
+  - name: mock_pick
+    args:
+      - object_name
+  - name: mock_place
+    args:
+      - location_hint

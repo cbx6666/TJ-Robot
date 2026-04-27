@@ -17,12 +17,21 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
-    params_file = LaunchConfiguration("params_file")
+    nav2_base_params = LaunchConfiguration("nav2_base_params")
+    nav2_profile_params = LaunchConfiguration("nav2_profile_params")
 
-    default_params = os.path.join(
+    default_base_params = os.path.join(
         get_package_share_directory("robot_bringup"),
         "config",
-        "nav2_params_slam.yaml",
+        "nav2",
+        "base.yaml",
+    )
+    default_profile_params = os.path.join(
+        get_package_share_directory("robot_bringup"),
+        "config",
+        "nav2",
+        "profiles",
+        "coverage_patrol.yaml",
     )
     default_bt_xml = os.path.join(
         get_package_share_directory("nav2_bt_navigator"),
@@ -33,21 +42,23 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("use_sim_time", default_value="true"),
-            DeclareLaunchArgument("params_file", default_value=default_params),
-            LogInfo(msg=["Starting Nav2 with params=", params_file]),
+            DeclareLaunchArgument("nav2_base_params", default_value=default_base_params),
+            DeclareLaunchArgument("nav2_profile_params", default_value=default_profile_params),
+            LogInfo(msg=["Starting Nav2 with base=", nav2_base_params]),
+            LogInfo(msg=["Starting Nav2 with profile=", nav2_profile_params]),
             Node(
                 package="nav2_controller",
                 executable="controller_server",
                 name="controller_server",
                 output="screen",
-                parameters=[params_file, {"use_sim_time": use_sim_time}],
+                parameters=[nav2_base_params, nav2_profile_params, {"use_sim_time": use_sim_time}],
             ),
             Node(
                 package="nav2_planner",
                 executable="planner_server",
                 name="planner_server",
                 output="screen",
-                parameters=[params_file, {"use_sim_time": use_sim_time}],
+                parameters=[nav2_base_params, nav2_profile_params, {"use_sim_time": use_sim_time}],
             ),
             Node(
                 package="nav2_bt_navigator",
@@ -55,7 +66,8 @@ def generate_launch_description():
                 name="bt_navigator",
                 output="screen",
                 parameters=[
-                    params_file,
+                    nav2_base_params,
+                    nav2_profile_params,
                     {"use_sim_time": use_sim_time, "default_bt_xml_filename": default_bt_xml},
                 ],
             ),
@@ -64,7 +76,7 @@ def generate_launch_description():
                 executable="behavior_server",
                 name="behavior_server",
                 output="screen",
-                parameters=[params_file, {"use_sim_time": use_sim_time}],
+                parameters=[nav2_base_params, nav2_profile_params, {"use_sim_time": use_sim_time}],
             ),
             Node(
                 package="nav2_lifecycle_manager",

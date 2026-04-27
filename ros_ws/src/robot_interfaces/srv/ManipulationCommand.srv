@@ -1,0 +1,6 @@
+string action
+string object_name
+string location_hint
+---
+bool success
+string message

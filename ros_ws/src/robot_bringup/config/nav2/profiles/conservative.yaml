@@ -1,0 +1,31 @@
+# Conservative profile for cluttered scenes.
+
+controller_server:
+  ros__parameters:
+    controller_frequency: 10.0
+    goal_checker:
+      xy_goal_tolerance: 0.20
+      yaw_goal_tolerance: 0.35
+    FollowPath:
+      max_vel_x: 0.32
+      max_vel_theta: 1.2
+      min_vel_theta: -1.2
+      sim_time: 1.8
+      PathAlign.scale: 20.0
+      GoalAlign.scale: 16.0
+      PathDist.scale: 20.0
+      GoalDist.scale: 20.0
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      inflation_layer:
+        inflation_radius: 0.70
+        cost_scaling_factor: 3.2
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      inflation_layer:
+        inflation_radius: 0.75
+        cost_scaling_factor: 3.2

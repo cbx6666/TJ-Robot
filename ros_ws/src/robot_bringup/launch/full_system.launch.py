@@ -24,7 +24,6 @@ def generate_launch_description():
             DeclareLaunchArgument("use_sim_time", default_value="true"),
             _include(bringup_share, "slam.launch.py", use_sim_time),
             _include(bringup_share, "perception.launch.py", use_sim_time),
-            _include(bringup_share, "interaction.launch.py", use_sim_time),
-            _include(bringup_share, "task_manager.launch.py", use_sim_time),
+            _include(bringup_share, "task_pipeline.launch.py", use_sim_time),
         ]
     )

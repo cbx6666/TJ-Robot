@@ -1,36 +1,24 @@
-# 未来开发路线
+# 未来开发路线（基于 `ros_ws/src`）
 
-## ASR
+## 感知链路
 
-在 `robot_perception/speech/asr_node.py` 接入语音识别，输出 `/interaction/speech_text`。
+- 在 `human_yolo_seg` 内扩展语义目标类型（不只 person）。
+- 增加检测稳定性指标与误检回放工具。
 
-## NLU 与交互
+## 导航与任务
 
-扩展 `robot_interaction/nlu/intent_parser.py`，支持导航、搜索、建图、巡航、停止等 intent。
+- 强化 `robot_navigation` 的覆盖策略参数化与回归测试。
+- 在 `robot_tasks` 补充任务状态机与恢复策略。
 
-## TTS
+## 接口契约
 
-在 `robot_interaction/tts/tts_node.py` 接入任务确认、失败提示和搜索结果播报。
+- 在 `robot_interfaces` 增加任务与语义相关消息定义，减少隐式 YAML 契约。
 
-## 地图语义与后处理
+## 工程化
 
-- `robot_mapping/semantic/`：人物区域、动态对象、语义标记。
-- `robot_mapping/strip/`：person-free 地图清理和 occupancy map refinement。
+- 补齐关键节点单元测试与端到端冒烟脚本。
+- 统一数据产物目录和命名规范（`data/maps`、`data/logs`）。
 
-## 屋内搜索
+## 真机迁移
 
-目标流程：
-
-```text
-task input
--> room_navigation
--> candidate search point
--> YOLO object_detector
--> found/not found
--> next point
--> result
-```
-
-## 真实机器人迁移
-
-替换 `robot_perception/lidar`、`robot_perception/vision` 和 `robot_navigation` 的仿真适配，复用上层 `robot_mapping`、`robot_tasks`、`robot_interaction` 和 `robot_experiments`。
+- 逐步替换仿真传感器话题与 TF，保持 `ros_ws/src` 包边界不变，减少迁移成本。

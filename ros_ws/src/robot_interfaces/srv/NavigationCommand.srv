@@ -1,0 +1,6 @@
+string mode
+string target_room
+string target_pose_name
+---
+bool accepted
+string message

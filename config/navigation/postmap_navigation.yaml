@@ -1,0 +1,13 @@
+navigation_postmap:
+  description: 建图后导航（RGBD+激光）
+  mode: post_map
+  sensor_mode: rgbd_plus_laser
+  default_strategy: coverage_patrol_nav2
+  available_strategies:
+    - coverage_patrol_nav2
+    - point_to_point
+    - coverage_patrol
+  safety:
+    obstacle_source_topic: /scan
+    enable_dynamic_obstacle_avoidance: true
+    conservative_profile: ros_ws/src/robot_bringup/config/nav2/profiles/conservative.yaml

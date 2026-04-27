@@ -1,5 +1,5 @@
 # pyright: reportMissingImports=false
-"""Voice demo composition placeholder."""
+"""Voice demo composition using interaction/task/manipulation pipeline."""
 
 import os
 
@@ -18,14 +18,12 @@ def generate_launch_description():
             DeclareLaunchArgument("use_sim_time", default_value="true"),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
-                    os.path.join(share, "launch", "interaction.launch.py")
-                )
-            ),
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    os.path.join(share, "launch", "task_manager.launch.py")
+                    os.path.join(share, "launch", "task_pipeline.launch.py")
                 ),
-                launch_arguments={"use_sim_time": use_sim_time}.items(),
+                launch_arguments={
+                    "use_sim_time": use_sim_time,
+                    "enable_mock_voice": "true",
+                }.items(),
             ),
         ]
     )

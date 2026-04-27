@@ -1,0 +1,7 @@
+mock_manipulation:
+  command_topic: /manipulation/command_text
+  status_topic: /manipulation/status_text
+  services:
+    pick: /manipulation/mock_pick
+    place: /manipulation/mock_place
+  default_object: unknown_object

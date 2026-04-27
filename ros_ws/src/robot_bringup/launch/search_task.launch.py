@@ -25,6 +25,6 @@ def generate_launch_description():
             DeclareLaunchArgument("use_sim_time", default_value="true"),
             _include(share, "nav2.launch.py", use_sim_time),
             _include(share, "perception.launch.py", use_sim_time),
-            _include(share, "task_manager.launch.py", use_sim_time),
+            _include(share, "task_pipeline.launch.py", use_sim_time),
         ]
     )

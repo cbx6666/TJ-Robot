@@ -1,1 +1,1 @@
-"""Perception-layer adapters for the legacy human_yolo_seg package."""
+"""Perception-layer adapters for human_yolo_seg package."""
