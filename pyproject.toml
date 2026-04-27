@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tj-robot-system"
+version = "0.1.0"
+description = "Layered indoor service robot system scaffolding around the ROS 2 workspace."
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+include = [
+  "robot_core*",
+  "robot_perception*",
+  "robot_mapping*",
+  "robot_navigation*",
+  "robot_interaction*",
+  "robot_tasks*",
+  "robot_experiments*",
+]

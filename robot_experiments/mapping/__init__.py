@@ -1,0 +1,1 @@
+"""Mapping experiment descriptors."""

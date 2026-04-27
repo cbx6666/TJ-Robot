@@ -1,0 +1,9 @@
+task:
+  manager_node: task_manager
+  event_topic: /task/events
+  status_topic: /task/status
+  default_search_points:
+    living_room:
+      - [0.0, 0.0, 0.0]
+    kitchen:
+      - [1.5, 0.0, 0.0]

@@ -30,11 +30,14 @@ setup(
     license="MIT",
     entry_points={
         "console_scripts": [
-            "yolo_person_seg_node = human_yolo_seg.yolo_person_seg_node:main",
+            "yolo_person_seg_node = human_yolo_seg.perception.vision.yolo_detector_node:main",
+            "yolo_detector_node = human_yolo_seg.perception.vision.yolo_detector_node:main",
+            "person_detector_node = human_yolo_seg.perception.vision.person_detector_node:main",
+            "object_detector_node = human_yolo_seg.perception.vision.object_detector_node:main",
             "yolo_person_watch = human_yolo_seg.yolo_person_watch:main",
-            "scan_person_filter_node = human_yolo_seg.scan_person_filter_node:main",
-            "person_strip_recorder_node = human_yolo_seg.person_strip_recorder_node:main",
-            "strip_saved_map_person_free = human_yolo_seg.strip_saved_map:main",
+            "scan_person_filter_node = human_yolo_seg.perception.lidar.scan_filter_node:main",
+            "person_strip_recorder_node = human_yolo_seg.processing.region.region_accumulator:main",
+            "strip_saved_map_person_free = human_yolo_seg.processing.strip.strip_saved_map_person_free:main",
             "annotate_saved_map_person_overlay = human_yolo_seg.annotate_saved_map_person_overlay:main",
             "snapshot_person_regions_from_cloud = human_yolo_seg.snapshot_person_regions_from_cloud:main",
             "scan_map_colored_cloud_node = human_yolo_seg.scan_map_colored_cloud_node:main",

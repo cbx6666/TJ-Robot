@@ -1,59 +1,50 @@
-﻿# scripts
+# scripts
 
-环境安装与仿真**主控栈**（`tb3_stack.sh`）。
+脚本层只负责环境准备、构建、启动、保存、后处理和清理，不承载核心算法逻辑。
 
-全仓库「功能 → 源码路径」总索引：**[../docs/代码与功能索引.md](../docs/代码与功能索引.md)**。
-
-## 脚本
+## 基础脚本
 
 | 文件 | 作用 |
-|------|------|
-| `setup_env.sh` | 安装 ROS 2 Humble、Gazebo、TurtleBot3、SLAM Toolbox 与工作区依赖（按脚本内说明）。 |
-| `bootstrap.sh` | 首次环境冒烟；**源码变更后仍需自行 `colcon build`**。 |
-| `tb3_stack.sh` | **主入口**：Gazebo、生成机器人与障碍、`slam_toolbox`、RViz、可选 **YOLO + 人物激光链**（strip/filter + 方位角 Marker；整帧 map 上色默认关，见 `TB3_ENABLE_SCAN_MAP_COLORED`）。子命令：`start` / `stop` / `check` / `logs` / `rviz`。 |
+|---|---|
+| `setup_env.sh` | 安装 ROS 2 Humble、Gazebo、TurtleBot3、SLAM Toolbox、Nav2 等系统依赖。 |
+| `build.sh` | 编译 `ros_ws`。 |
+| `common.sh` | 新脚本共享的项目根目录、ROS source、输出目录准备函数。 |
+| `tb3_stack.sh` | 兼容主栈，负责当前稳定的 Gazebo/TurtleBot3/SLAM/RViz/YOLO 编排。 |
 
-## 推荐启动（assist + YOLO）
+## 运行入口
 
-`assist` 且**不写** `TURTLEBOT3_MODEL` → 默认 **Burger**。需要 Waffle 深度时再设 `TURTLEBOT3_MODEL=waffle`。
+| 文件 | 作用 |
+|---|---|
+| `run_simulation.sh` | 启动基础仿真。 |
+| `run_baseline_mapping.sh` | 启动普通激光 SLAM baseline。 |
+| `run_semantic_mapping.sh` | 启动 YOLO/person region 语义辅助建图。 |
+| `run_navigation.sh` | 启动 Nav2 wrapper。 |
+| `run_voice_demo.sh` | 启动语音交互预留入口。 |
+| `run_search_task.sh` | 启动屋内搜索预留入口。 |
+| `run_full_system.sh` | 启动完整系统预留入口。 |
 
-```bash
-cd <仓库根目录>
-bash scripts/setup_env.sh          # 按需
+## 数据脚本
 
-cd ros_ws && source /opt/ros/humble/setup.bash && colcon build && source install/setup.bash && cd ..
-
-TB3_STACK_MODE=assist TB3_ASSIST_SCAN_FILTER=1 bash scripts/tb3_stack.sh start
-```
+| 文件 | 作用 |
+|---|---|
+| `save_map.sh` | 调用 `nav2_map_server map_saver_cli` 保存 `/map` 到 `data/maps/<kind>`。 |
+| `strip_map.sh` | 调用 `strip_saved_map_person_free` 输出 after_strip 地图。 |
+| `clean_outputs.sh` | 清理 `data/maps/*`、`data/logs`、`data/results` 下的生成文件。 |
 
 ## 常用命令
 
 ```bash
-bash scripts/tb3_stack.sh start
-bash scripts/tb3_stack.sh check
-bash scripts/tb3_stack.sh logs all
-bash scripts/tb3_stack.sh stop
+bash scripts/build.sh
+bash scripts/run_baseline_mapping.sh
+bash scripts/save_map.sh raw
+
+bash scripts/run_semantic_mapping.sh
+bash scripts/save_map.sh before_strip
+bash scripts/strip_map.sh data/maps/before_strip/map_xxx.yaml ~/.ros/tj_person_strip_regions.yaml
 ```
 
-`logs` 可查 `yolo`、`yolo_map_pipeline`、`slam` 等，详见脚本内 `usage`。
+停止仿真：
 
-## 环境变量（摘录）
-
-- **`TB3_STACK_MODE`**：`laser` | `assist`
-- **`TB3_ASSIST_SCAN_FILTER`**：`0` | `1`（`1` 且已安装包时起 YOLO 人物链）
-- **`TB3_PERSON_SLAM_MODE`**：`mark_then_strip`（默认，SLAM 用 `/scan`）| `filtered`（SLAM 用 `/scan_filtered`）
-- **`TB3_ENABLE_SCAN_MAP_COLORED`**：`0`（默认）| `1` 额外起 `scan_map_colored_cloud`（整帧激光投 map）
-- **`TB3_ASSIST_RGBD_BRIDGE`**：`0` | `1`（assist + 深度时）
-- **`TURTLEBOT3_MODEL`**：`burger` | `waffle` | `waffle_pi`
-- **`YOLO_DEVICE`**：`auto` | `cpu` | `cuda:0`
-- **`TB3_NO_GUI` / `TB3_HEADLESS`**：不启 gzclient / RViz2
-- **`TB3_SCAN_FOV_LIMIT`**、**`TB3_SCAN_FOV_MIN_DEG`**、**`TB3_SCAN_FOV_MAX_DEG`**：filtered 模式下限制激光扇区（见脚本注释）
-- **`ROBOT_START_X/Y/Z/YAW`**：生成位姿
-
-WSL 下 `ros2` CLI 较慢；`tb3_stack.sh` 的话题检查已尽量合并为单次 `ros2 topic list`。
-
-## 与巡航的关系
-
-- 默认 **mark_then_strip**：建图走 **`/scan`**；**`coverage_patrol`** 仍订阅 **`/scan`** 做近距离避障。
-- **`filtered`**：建图走 **`/scan_filtered`**；巡航仍建议用 **`/scan`** 避障。
-
-存图目录、叠加图等：**`robot_navigation` 包内 README**。
+```bash
+bash scripts/tb3_stack.sh stop
+```

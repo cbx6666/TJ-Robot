@@ -1,0 +1,16 @@
+experiment:
+  output_root: data/results
+  log_root: data/logs
+  freeze_config_files:
+    - config/paths.yaml
+    - config/topics.yaml
+    - config/slam.yaml
+    - config/yolo.yaml
+    - config/experiment.yaml
+  baseline:
+    stack_mode: laser
+    assist_scan_filter: 0
+  semantic_mapping:
+    stack_mode: assist
+    assist_scan_filter: 1
+    person_slam_mode: mark_then_strip

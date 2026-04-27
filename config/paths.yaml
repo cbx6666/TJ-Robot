@@ -1,0 +1,21 @@
+project:
+  ros_workspace: ros_ws
+  ros_src: ros_ws/src
+
+packages:
+  bringup: robot_bringup
+  navigation: robot_navigation
+  perception_legacy: human_yolo_seg
+  tasks: robot_tasks
+  interfaces: robot_interfaces
+
+data:
+  root: data
+  maps_raw: data/maps/raw
+  maps_before_strip: data/maps/before_strip
+  maps_after_strip: data/maps/after_strip
+  maps_semantic: data/maps/semantic
+  logs: data/logs
+  results: data/results
+  datasets: data/datasets
+  recordings: data/recordings

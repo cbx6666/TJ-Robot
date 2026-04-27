@@ -15,5 +15,9 @@ setup(
     maintainer="dev",
     description="Task orchestration and mission logic.",
     license="MIT",
+    entry_points={
+        "console_scripts": [
+            "task_manager_node = robot_tasks.task_manager_node:main",
+        ],
+    },
 )
-

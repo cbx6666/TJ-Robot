@@ -1,0 +1,7 @@
+slam:
+  backend: slam_toolbox
+  default_launch: robot_bringup slam_laser.launch.py
+  use_sim_time: true
+  scan_topic: /scan
+  filtered_scan_topic: /scan_filtered
+  params_file: ros_ws/src/robot_bringup/config/mapper_params_online_async_full_scan.yaml

@@ -1,0 +1,1 @@
+"""Strip post-processing adapters."""

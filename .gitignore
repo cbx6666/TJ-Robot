@@ -1,4 +1,4 @@
-# colcon（在仓库根或 ros_ws 下 build 时生成，勿提交）
+# colcon outputs
 build/
 install/
 log/
@@ -8,18 +8,27 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 
-# saved_maps：仅保留 README / .gitkeep；实验建图结果（栅格、yaml、叠加图等）不入库
-saved_maps/*
-!saved_maps/README.txt
-!saved_maps/.gitkeep
-
-ros_ws/saved_maps/
-
-# 本地 YOLO 权重（体积大；包内 models/*.pt 见 ros_ws/src/human_yolo_seg/.gitignore）
+# Local YOLO weights
 /yolo26n-seg.pt
 
-# 临时/本机 SDF
+# Temporary/local SDF
 model_in.sdf
-
-
 /ros_ws/src/robot_bringup/models
+
+# System outputs
+data/maps/raw/*
+data/maps/before_strip/*
+data/maps/after_strip/*
+data/maps/semantic/*
+data/logs/*
+data/results/*
+data/datasets/*
+data/recordings/*
+!data/maps/raw/.gitkeep
+!data/maps/before_strip/.gitkeep
+!data/maps/after_strip/.gitkeep
+!data/maps/semantic/.gitkeep
+!data/logs/.gitkeep
+!data/results/.gitkeep
+!data/datasets/.gitkeep
+!data/recordings/.gitkeep

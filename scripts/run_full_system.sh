@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common.sh
+source "${SCRIPT_DIR}/common.sh"
+
+require_ros
+source_workspace_if_available
+prepare_output_dirs
+
+export TB3_STACK_MODE="${TB3_STACK_MODE:-assist}"
+export TB3_ASSIST_SCAN_FILTER="${TB3_ASSIST_SCAN_FILTER:-1}"
+export TB3_PERSON_SLAM_MODE="${TB3_PERSON_SLAM_MODE:-mark_then_strip}"
+export TB3_LOG_DIR="${TB3_LOG_DIR:-${PROJECT_ROOT}/data/logs/full_system}"
+
+echo "Starting simulation/perception/mapping stack first."
+bash "${PROJECT_ROOT}/scripts/tb3_stack.sh" start
+
+echo "Starting task manager. Press Ctrl-C here, then run scripts/tb3_stack.sh stop to stop Gazebo."
+exec ros2 launch robot_bringup task_manager.launch.py "$@"

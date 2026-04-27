@@ -1,0 +1,10 @@
+yolo:
+  model_path: ros_ws/src/human_yolo_seg/models/yolo26n-seg.pt
+  device: auto
+  image_topic: /camera/image_raw
+  camera_info_topic: /camera/camera_info
+  annotated_topic: /human_yolo/annotated_image
+  conf_threshold: 0.25
+  imgsz: 640
+  target_class_ids:
+    person: 0

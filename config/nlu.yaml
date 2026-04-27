@@ -1,0 +1,10 @@
+nlu:
+  enabled: false
+  language: zh-CN
+  intent_topic: /interaction/parsed_intent
+  supported_intents:
+    - navigate_to_room
+    - search_object
+    - build_map
+    - patrol
+    - stop

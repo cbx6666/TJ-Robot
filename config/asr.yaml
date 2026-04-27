@@ -1,0 +1,5 @@
+asr:
+  enabled: false
+  provider: placeholder
+  microphone_device: default
+  output_topic: /interaction/speech_text

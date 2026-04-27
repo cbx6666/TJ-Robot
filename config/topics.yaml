@@ -1,0 +1,18 @@
+topics:
+  clock: /clock
+  odom: /odom
+  tf: /tf
+  scan: /scan
+  scan_filtered: /scan_filtered
+  map: /map
+  map_metadata: /map_metadata
+  cmd_vel: /cmd_vel
+  camera_image: /camera/image_raw
+  camera_info: /camera/camera_info
+  yolo_annotated_image: /human_yolo/annotated_image
+  person_azimuth_ranges: /human_yolo/person_azimuth_ranges
+  person_laser_map_cloud: /human_yolo/person_laser_map_cloud
+  speech_text: /interaction/speech_text
+  parsed_intent: /interaction/parsed_intent
+  task_event: /task/events
+  task_status: /task/status
