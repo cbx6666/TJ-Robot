@@ -1,7 +1,0 @@
-navigation:
-  backend: nav2
-  default_launch: robot_bringup nav2_coverage_patrol.launch.py
-  use_sim_time: true
-  map_yaml: data/maps/semantic_post_strip/latest.yaml
-  nav2_base_params: ros_ws/src/robot_bringup/config/nav2/base.yaml
-  nav2_profile_params: ros_ws/src/robot_bringup/config/nav2/profiles/coverage_patrol.yaml

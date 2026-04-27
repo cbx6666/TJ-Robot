@@ -23,7 +23,6 @@ def generate_launch_description():
     voice_api_url = LaunchConfiguration("voice_api_url")
     llm_api_url = LaunchConfiguration("llm_api_url")
     llm_model = LaunchConfiguration("llm_model")
-    navigation_strategy = LaunchConfiguration("navigation_strategy")
 
     share = get_package_share_directory("robot_bringup")
     return LaunchDescription([
@@ -32,7 +31,6 @@ def generate_launch_description():
         DeclareLaunchArgument("voice_api_url", default_value=""),
         DeclareLaunchArgument("llm_api_url", default_value=""),
         DeclareLaunchArgument("llm_model", default_value="gpt-4o-mini"),
-        DeclareLaunchArgument("navigation_strategy", default_value="coverage_patrol_nav2"),
         _inc(
             share,
             "interaction.launch.py",
@@ -42,14 +40,6 @@ def generate_launch_description():
                 "voice_api_url": voice_api_url,
                 "llm_api_url": llm_api_url,
                 "llm_model": llm_model,
-            },
-        ),
-        _inc(
-            share,
-            "navigation_modes.launch.py",
-            {
-                "use_sim_time": use_sim_time,
-                "navigation_strategy": navigation_strategy,
             },
         ),
         _inc(share, "task_manager.launch.py", {"use_sim_time": use_sim_time}),

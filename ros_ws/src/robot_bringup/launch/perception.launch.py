@@ -14,16 +14,12 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("use_sim_time", default_value="true"),
-            DeclareLaunchArgument("enable_yolo", default_value="true"),
-            DeclareLaunchArgument("person_slam_mode", default_value="mark_then_strip"),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
                     os.path.join(share, "launch", "yolo_person_seg.launch.py")
                 ),
                 launch_arguments={
                     "use_sim_time": LaunchConfiguration("use_sim_time"),
-                    "enable_yolo": LaunchConfiguration("enable_yolo"),
-                    "person_slam_mode": LaunchConfiguration("person_slam_mode"),
                 }.items(),
             ),
         ]

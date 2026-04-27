@@ -22,7 +22,6 @@ class TaskManagerNode(Node):
         self.declare_parameter("event_topic", "/task/events")
         self.declare_parameter("status_topic", "/task/status")
         self.declare_parameter("goal_text_topic", "/task/goal_text")
-        self.declare_parameter("navigation_command_topic", "/navigation/command_text")
         self.declare_parameter("manipulation_command_topic", "/manipulation/command_text")
         self.declare_parameter("heartbeat_sec", 2.0)
         self.declare_parameter("task_id", "bootstrap")
@@ -30,13 +29,11 @@ class TaskManagerNode(Node):
         self._status_topic = str(self.get_parameter("status_topic").value)
         self._task_id = str(self.get_parameter("task_id").value)
         self._goal_text_topic = str(self.get_parameter("goal_text_topic").value)
-        self._nav_command_topic = str(self.get_parameter("navigation_command_topic").value)
         self._mani_command_topic = str(self.get_parameter("manipulation_command_topic").value)
         heartbeat_sec = max(float(self.get_parameter("heartbeat_sec").value), 0.2)
 
         self._status_pub = None
         self._status_str_pub = self.create_publisher(String, f"{self._status_topic}_text", 10)
-        self._nav_cmd_pub = self.create_publisher(String, self._nav_command_topic, 10)
         self._mani_cmd_pub = self.create_publisher(String, self._mani_command_topic, 10)
         self.create_subscription(String, self._goal_text_topic, self._on_goal_text, 10)
         if TaskStatus is not None:
@@ -53,7 +50,7 @@ class TaskManagerNode(Node):
         self.create_timer(heartbeat_sec, self._publish_heartbeat)
         self.get_logger().info(
             f"task_manager subscriptions: goal={self._goal_text_topic}; "
-            f"outputs nav={self._nav_command_topic}, manipulation={self._mani_command_topic}"
+            f"outputs manipulation={self._mani_command_topic}"
         )
 
     def _publish_heartbeat(self) -> None:
@@ -84,23 +81,11 @@ class TaskManagerNode(Node):
         if not text:
             return
         # Minimal rule-based orchestration scaffold:
-        # 1) room-level navigation command
-        # 2) object search/pick command
-        room = self._infer_room(text)
+        # focus on object pick/place semantics for RGBD + YOLO stage.
         obj = self._infer_object(text)
-        if room:
-            self._nav_cmd_pub.publish(String(data=f"NAVIGATE:{room}"))
         if obj:
             self._mani_cmd_pub.publish(String(data=f"PICK:{obj}"))
-        self._publish_status_event("EXECUTING", f"goal={text} room={room or 'NA'} object={obj or 'NA'}")
-
-    @staticmethod
-    def _infer_room(text: str) -> str:
-        rooms = ["客厅", "厨房", "卧室", "书房", "走廊"]
-        for room in rooms:
-            if room in text:
-                return room
-        return ""
+        self._publish_status_event("EXECUTING", f"goal={text} object={obj or 'NA'}")
 
     @staticmethod
     def _infer_object(text: str) -> str:
