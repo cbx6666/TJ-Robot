@@ -52,9 +52,13 @@ jobs:
           sudo apt-get install -y python3-rosdep || true
           # Some fresh runners need rosdep initialization.
           sudo rosdep init || true
-          retry 3 5 rosdep update
+          if ! retry 3 5 rosdep update; then
+            echo "::warning::rosdep update failed after retries, continue to build for further diagnosis"
+          fi
           # Verbose output helps pinpoint unresolved keys in CI logs.
-          rosdep install --from-paths ros_ws/src --ignore-src -r -y -v
+          if ! rosdep install --from-paths ros_ws/src --ignore-src -r -y -v; then
+            echo "::warning::rosdep install failed, continue to build/test to expose missing deps explicitly"
+          fi
 
       - name: Build (selected packages)
         shell: bash
