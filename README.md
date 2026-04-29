@@ -31,7 +31,17 @@ docs/                  架构与实验文档
 ```bash
 bash scripts/build.sh
 bash scripts/run_simulation.sh         # 默认 RGBD 机器人（waffle + assist）
+bash scripts/run_mapping.sh            # 仅激光 + SLAM + RViz（建图常用）
 bash scripts/run_full_system.sh        # 语音/LLM/任务/mock抓放全链路
+```
+
+建图模式是否开启 Gazebo 界面（`gzclient`）：
+
+```bash
+bash scripts/run_mapping.sh                                # 默认只开 RViz，不开 Gazebo 界面
+TB3_ENABLE_GZCLIENT=1 bash scripts/run_mapping.sh          # 同时开启 Gazebo 界面 + RViz
+TB3_ENABLE_RVIZ=0 TB3_ENABLE_GZCLIENT=1 bash scripts/run_mapping.sh  # 仅 Gazebo 界面
+TB3_MODEL=burger bash scripts/run_mapping.sh               # 显式切换模型（默认 waffle）
 ```
 
 停止仿真：

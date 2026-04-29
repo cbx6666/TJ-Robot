@@ -16,6 +16,7 @@
 | 文件 | 作用 |
 |---|---|
 | `run_simulation.sh` | 启动默认仿真（RGBD 机器人：`waffle + assist + rgbd bridge`）。 |
+| `run_mapping.sh` | 启动建图常用栈（仅激光 + SLAM + RViz，默认不开 Gazebo 界面）。 |
 | `run_voice_demo.sh` | 启动语音/LLM/任务/mock抓放入口。 |
 | `run_full_system.sh` | 启动完整系统（仿真 + 感知 + 语音/LLM + 任务 + mock抓放）。 |
 
@@ -24,7 +25,17 @@
 ```bash
 bash scripts/build.sh
 bash scripts/run_simulation.sh
+bash scripts/run_mapping.sh
 bash scripts/run_full_system.sh
+```
+
+建图模式 GUI 常用切换：
+
+```bash
+bash scripts/run_mapping.sh
+TB3_ENABLE_GZCLIENT=1 bash scripts/run_mapping.sh
+TB3_ENABLE_RVIZ=0 TB3_ENABLE_GZCLIENT=1 bash scripts/run_mapping.sh
+TB3_MODEL=burger bash scripts/run_mapping.sh
 ```
 
 停止仿真：

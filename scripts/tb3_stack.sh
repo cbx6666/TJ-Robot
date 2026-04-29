@@ -26,6 +26,13 @@ TB3_ASSIST_SCAN_FILTER="${TB3_ASSIST_SCAN_FILTER:-1}"
 TB3_ASSIST_RGBD_BRIDGE="${TB3_ASSIST_RGBD_BRIDGE:-1}"
 TB3_ENABLE_SLAM="${TB3_ENABLE_SLAM:-1}"
 TB3_LOG_DIR="${TB3_LOG_DIR:-/tmp/tb3_stack}"
+TB3_ENABLE_GZCLIENT="${TB3_ENABLE_GZCLIENT:-1}"
+TB3_ENABLE_RVIZ="${TB3_ENABLE_RVIZ:-1}"
+# 兼容旧开关：TB3_NO_GUI=1 时同时关闭 gzclient 与 rviz2。
+if [[ "${TB3_NO_GUI:-0}" == "1" ]]; then
+  TB3_ENABLE_GZCLIENT="0"
+  TB3_ENABLE_RVIZ="0"
+fi
 # Gazebo 相机渲染频率（Hz）。默认 2 以减轻 WSL/软件渲染负载。
 # 需要更高视觉帧率时可临时设为 10/30。
 TB3_CAMERA_UPDATE_RATE="${TB3_CAMERA_UPDATE_RATE:-2}"
@@ -101,6 +108,44 @@ wait_for_topic() {
   return 1
 }
 
+format_duration() {
+  local total_s="$1"
+  printf "%02dm%02ds" "$((total_s / 60))" "$((total_s % 60))"
+}
+
+step_begin() {
+  local idx="$1"
+  local total="$2"
+  local title="$3"
+  echo "[${idx}/${total}] ${title}"
+}
+
+step_end() {
+  local title="$1"
+  local step_t0="$2"
+  local stack_t0="$3"
+  local step_elapsed=$((SECONDS - step_t0))
+  local total_elapsed=$((SECONDS - stack_t0))
+  echo "  -> ${title} | step=$(format_duration "${step_elapsed}") total=$(format_duration "${total_elapsed}")"
+}
+
+wait_topic_with_timing() {
+  local topic="$1"
+  local timeout_s="${2:-20}"
+  local stack_t0="$3"
+  local t0=$SECONDS
+  if wait_for_topic "${topic}" "${timeout_s}"; then
+    local elapsed=$((SECONDS - t0))
+    local total_elapsed=$((SECONDS - stack_t0))
+    echo "  -> topic ready ${topic} | wait=$(format_duration "${elapsed}") total=$(format_duration "${total_elapsed}")"
+    return 0
+  fi
+  local elapsed=$((SECONDS - t0))
+  local total_elapsed=$((SECONDS - stack_t0))
+  echo "  -> topic timeout ${topic} (${timeout_s}s) | wait=$(format_duration "${elapsed}") total=$(format_duration "${total_elapsed}")"
+  return 1
+}
+
 publish_robot_description() {
   local urdf_file="$1"
   local payload
@@ -112,6 +157,9 @@ publish_robot_description() {
 expand_robot_urdf() {
   local input_file="$1"
   local output_file="$2"
+  if [[ -f "${output_file}" && "${output_file}" -nt "${input_file}" ]]; then
+    return 0
+  fi
   if ! ros2 run xacro xacro "${input_file}" >"${output_file}" 2>"${TB3_LOG_DIR}/xacro_tb3.log"; then
     echo "ERROR: xacro 展开失败: ${input_file}" >&2
     echo "       详情见: ${TB3_LOG_DIR}/xacro_tb3.log" >&2
@@ -197,6 +245,9 @@ PY
 }
 
 do_start() {
+  local stack_t0=$SECONDS
+  local step_t0
+
   cleanup_old
 
   export TURTLEBOT3_MODEL
@@ -220,17 +271,15 @@ do_start() {
   done
   export GAZEBO_MODEL_PATH="${_model_paths}"
 
-  echo "[1/6] Start gzserver"
+  step_t0=$SECONDS
+  step_begin "1" "8" "Start gzserver"
   setsid gzserver "${WORLD_FILE}" --verbose -s libgazebo_ros_init.so -s libgazebo_ros_factory.so \
     >"${TB3_LOG_DIR}/gzserver.log" 2>&1 < /dev/null &
+  step_end "gzserver launched (service wait deferred)" "${step_t0}" "${stack_t0}"
 
-  if ! wait_for_service "/spawn_entity" "${TB3_GZSERVER_WAIT_SEC:-45}"; then
-    echo "ERROR: gzserver 未暴露 /spawn_entity" >&2
-    exit 1
-  fi
-
+  step_t0=$SECONDS
   if [[ "${TB3_ENABLE_RSP}" == "1" ]]; then
-    echo "[2/6] Start robot_state_publisher"
+    step_begin "2" "8" "Start robot_state_publisher"
     if [[ ! -f "${URDF_FILE}" ]]; then
       echo "ERROR: 未找到 URDF_FILE=${URDF_FILE}" >&2
       exit 1
@@ -244,29 +293,63 @@ do_start() {
       --ros-args -p use_sim_time:=true \
       >"${TB3_LOG_DIR}/robot_state_publisher.log" 2>&1 < /dev/null &
     publish_robot_description "${expanded_urdf}"
+    step_end "robot_state_publisher started" "${step_t0}" "${stack_t0}"
   else
-    echo "[2/6] Skip robot_state_publisher (TB3_ENABLE_RSP=0)"
+    step_begin "2" "8" "Start robot_state_publisher"
+    echo "Skip robot_state_publisher (TB3_ENABLE_RSP=0)"
+    step_end "robot_state_publisher skipped" "${step_t0}" "${stack_t0}"
   fi
 
-  echo "[3/6] Spawn robot model"
-  local spawn_model_file="${MODEL_FILE}"
-  if [[ -n "${TB3_CAMERA_UPDATE_RATE}" ]]; then
-    local patched_model="${TB3_LOG_DIR}/turtlebot3_${TURTLEBOT3_MODEL}_camera_${TB3_CAMERA_UPDATE_RATE}hz.sdf"
-    if prepare_model_with_camera_rate "${MODEL_FILE}" "${patched_model}" "${TB3_CAMERA_UPDATE_RATE}" "${TB3_ENABLE_CAMERA}" "${TB3_CAMERA_ALWAYS_ON}" \
-      >"${TB3_LOG_DIR}/camera_rate_patch.log" 2>&1; then
-      spawn_model_file="${patched_model}"
-      echo "Using camera mode: enable=${TB3_ENABLE_CAMERA}, always_on=${TB3_CAMERA_ALWAYS_ON}, update_rate=${TB3_CAMERA_UPDATE_RATE} Hz (${spawn_model_file})"
-    else
-      echo "Using original model file: ${MODEL_FILE}"
-    fi
+  step_t0=$SECONDS
+  step_begin "3" "8" "Spawn robot model"
+  local wait_spawn_t0=$SECONDS
+  if ! wait_for_service "/spawn_entity" "${TB3_GZSERVER_WAIT_SEC:-45}"; then
+    echo "ERROR: gzserver 未暴露 /spawn_entity" >&2
+    exit 1
   fi
+  echo "  -> /spawn_entity ready | wait=$(format_duration "$((SECONDS - wait_spawn_t0))")"
+  local spawn_model_file="${MODEL_FILE}"
+  local model_prep_t0=$SECONDS
+  if [[ "${TB3_ENABLE_CAMERA}" == "0" ]]; then
+    # 建图模式下生成并复用“禁用相机”的 SDF，避免每次都走深度相机链路。
+    local patched_model="${TB3_LOG_DIR}/turtlebot3_${TURTLEBOT3_MODEL}_camera_disabled.sdf"
+    if [[ ! -f "${patched_model}" || "${MODEL_FILE}" -nt "${patched_model}" ]]; then
+      if prepare_model_with_camera_rate "${MODEL_FILE}" "${patched_model}" "0" "0" "0" \
+        >"${TB3_LOG_DIR}/camera_rate_patch.log" 2>&1; then
+        spawn_model_file="${patched_model}"
+      else
+        echo "Using original model file: ${MODEL_FILE}"
+      fi
+    else
+      spawn_model_file="${patched_model}"
+    fi
+    echo "Using no-camera mode: enable=0 (${spawn_model_file})"
+  elif [[ -n "${TB3_CAMERA_UPDATE_RATE}" ]]; then
+    local patched_model="${TB3_LOG_DIR}/turtlebot3_${TURTLEBOT3_MODEL}_camera_${TB3_CAMERA_UPDATE_RATE}hz.sdf"
+    if [[ ! -f "${patched_model}" || "${MODEL_FILE}" -nt "${patched_model}" ]]; then
+      if prepare_model_with_camera_rate "${MODEL_FILE}" "${patched_model}" "${TB3_CAMERA_UPDATE_RATE}" "${TB3_ENABLE_CAMERA}" "${TB3_CAMERA_ALWAYS_ON}" \
+        >"${TB3_LOG_DIR}/camera_rate_patch.log" 2>&1; then
+        spawn_model_file="${patched_model}"
+      else
+        echo "Using original model file: ${MODEL_FILE}"
+      fi
+    else
+      spawn_model_file="${patched_model}"
+    fi
+    echo "Using camera mode: enable=${TB3_ENABLE_CAMERA}, always_on=${TB3_CAMERA_ALWAYS_ON}, update_rate=${TB3_CAMERA_UPDATE_RATE} Hz (${spawn_model_file})"
+  fi
+  echo "  -> model preprocess done | took=$(format_duration "$((SECONDS - model_prep_t0))")"
+  local spawn_t0=$SECONDS
   ros2 run gazebo_ros spawn_entity.py \
     -entity "${TURTLEBOT3_MODEL}" \
     -file "${spawn_model_file}" \
     -x "${ROBOT_START_X}" -y "${ROBOT_START_Y}" -z "${ROBOT_START_Z}" -Y "${ROBOT_START_YAW}" \
     >"${TB3_LOG_DIR}/spawn_entity.log" 2>&1
+  echo "  -> spawn_entity done | took=$(format_duration "$((SECONDS - spawn_t0))")"
+  step_end "robot model spawned" "${step_t0}" "${stack_t0}"
 
-  echo "[4/6] Start YOLO detection"
+  step_t0=$SECONDS
+  step_begin "4" "8" "Start YOLO detection"
   local yolo_enabled=0
   if [[ "${TB3_ASSIST_SCAN_FILTER}" == "1" && "${TB3_ENABLE_CAMERA}" == "1" ]]; then
     yolo_enabled=1
@@ -283,8 +366,10 @@ do_start() {
       echo "Skip YOLO detection (camera disabled: TB3_ENABLE_CAMERA=0)"
     fi
   fi
+  step_end "YOLO phase done" "${step_t0}" "${stack_t0}"
 
-  echo "[5/6] Optional RGBD bridge"
+  step_t0=$SECONDS
+  step_begin "5" "8" "Optional RGBD bridge"
   if [[ "${TB3_STACK_MODE}" == "assist" && "${TB3_ASSIST_RGBD_BRIDGE}" == "1" ]]; then
     setsid ros2 launch robot_bringup rgbd_to_scan.launch.py \
       use_sim_time:=true \
@@ -292,9 +377,11 @@ do_start() {
       depth_camera_info_topic:="${RGBD_DEPTH_CAMERA_INFO_TOPIC}" \
       >"${TB3_LOG_DIR}/rgbd_to_scan.log" 2>&1 < /dev/null &
   fi
+  step_end "RGBD bridge phase done" "${step_t0}" "${stack_t0}"
 
+  step_t0=$SECONDS
   if [[ "${TB3_ENABLE_SLAM}" == "1" ]]; then
-    echo "[6/7] Start SLAM toolbox (map publisher)"
+    step_begin "6" "8" "Start SLAM toolbox (map publisher)"
     if [[ -n "${TB3_SLAM_PARAMS_FILE}" ]]; then
       setsid ros2 launch robot_bringup slam_laser.launch.py \
         use_sim_time:=true \
@@ -305,13 +392,16 @@ do_start() {
         use_sim_time:=true \
         >"${TB3_LOG_DIR}/slam_toolbox.log" 2>&1 < /dev/null &
     fi
-    wait_for_topic "/map" 30 || true
+    step_end "SLAM launched (map wait in step 8)" "${step_t0}" "${stack_t0}"
   else
-    echo "[6/7] Skip SLAM toolbox (TB3_ENABLE_SLAM=0)"
+    step_begin "6" "8" "Start SLAM toolbox (map publisher)"
+    echo "Skip SLAM toolbox (TB3_ENABLE_SLAM=0)"
+    step_end "SLAM phase skipped" "${step_t0}" "${stack_t0}"
   fi
 
-  echo "[7/7] Start GUI (optional)"
-  if [[ "${TB3_NO_GUI:-0}" != "1" ]]; then
+  step_t0=$SECONDS
+  step_begin "7" "8" "Start GUI (optional)"
+  if [[ "${TB3_ENABLE_GZCLIENT}" == "1" || "${TB3_ENABLE_RVIZ}" == "1" ]]; then
     # 渲染兼容开关：默认走软件渲染（TB3_GAZEBO_HARDWARE_GL=0）以适配 WSL。
     # 若本机 GPU 环境稳定，可设 TB3_GAZEBO_HARDWARE_GL=1 走硬件渲染。
     if [[ "${TB3_GAZEBO_HARDWARE_GL:-0}" != "1" ]]; then
@@ -327,19 +417,35 @@ do_start() {
       echo "GUI render mode: hardware (TB3_GAZEBO_HARDWARE_GL=1)"
     fi
 
-    setsid gzclient >"${TB3_LOG_DIR}/gzclient.log" 2>&1 < /dev/null &
-    setsid rviz2 -d "${RVIZ_CONFIG_FILE}" --ros-args -p use_sim_time:=true \
-      >"${TB3_LOG_DIR}/rviz2.log" 2>&1 < /dev/null &
+    if [[ "${TB3_ENABLE_GZCLIENT}" == "1" ]]; then
+      setsid gzclient >"${TB3_LOG_DIR}/gzclient.log" 2>&1 < /dev/null &
+    else
+      echo "Skip gzclient (TB3_ENABLE_GZCLIENT=0)"
+    fi
+
+    if [[ "${TB3_ENABLE_RVIZ}" == "1" ]]; then
+      setsid rviz2 -d "${RVIZ_CONFIG_FILE}" --ros-args -p use_sim_time:=true \
+        >"${TB3_LOG_DIR}/rviz2.log" 2>&1 < /dev/null &
+    else
+      echo "Skip rviz2 (TB3_ENABLE_RVIZ=0)"
+    fi
+  else
+    echo "Skip GUI (TB3_ENABLE_GZCLIENT=0, TB3_ENABLE_RVIZ=0)"
   fi
+  step_end "GUI phase done" "${step_t0}" "${stack_t0}"
 
   # 仅等待已启用模块对应话题，避免无效等待拖慢启动。
-  wait_for_topic "/scan" 20 || true
+  step_t0=$SECONDS
+  step_begin "8" "8" "Warm-up topic checks"
+  wait_topic_with_timing "/scan" 20 "${stack_t0}" || true
   if [[ "${TB3_ENABLE_SLAM}" == "1" ]]; then
-    wait_for_topic "/map" 20 || true
+    wait_topic_with_timing "/map" 20 "${stack_t0}" || true
   fi
   if [[ "${yolo_enabled}" == "1" ]]; then
-    wait_for_topic "/human_yolo/annotated_image" 20 || true
+    wait_topic_with_timing "/human_yolo/annotated_image" 20 "${stack_t0}" || true
   fi
+  step_end "warm-up checks done" "${step_t0}" "${stack_t0}"
+  echo "Total startup time: $(format_duration "$((SECONDS - stack_t0))")"
   echo "Stack started. Logs: ${TB3_LOG_DIR}"
 }
 
@@ -391,6 +497,11 @@ Usage:
   bash scripts/tb3_stack.sh stop
   bash scripts/tb3_stack.sh check
   bash scripts/tb3_stack.sh logs [all|gzserver|gzclient|rviz|rsp|yolo|rgbd]
+
+Common GUI env switches:
+  TB3_ENABLE_GZCLIENT=0/1   (disable/enable Gazebo client window)
+  TB3_ENABLE_RVIZ=0/1       (disable/enable RViz window)
+  TB3_NO_GUI=1              (legacy switch, disable both)
 
 This simplified stack keeps only:
 - RGBD robot simulation

@@ -21,7 +21,10 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: |
+          set -euxo pipefail
           sudo apt-get update
+          # Some fresh runners need rosdep initialization.
+          sudo rosdep init || true
           rosdep update
           rosdep install --from-paths ros_ws/src --ignore-src -r -y
 
