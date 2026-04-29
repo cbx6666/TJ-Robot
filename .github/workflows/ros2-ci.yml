@@ -22,11 +22,35 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+          retry() {
+            local n=0
+            local max="${2:-3}"
+            local delay="${3:-5}"
+            until "$1"; do
+              n=$((n + 1))
+              if [[ "${n}" -ge "${max}" ]]; then
+                echo "ERROR: command failed after ${max} attempts: $1" >&2
+                return 1
+              fi
+              echo "Retry ${n}/${max} for: $1"
+              sleep "${delay}"
+            done
+          }
+
+          echo "=== ROS/rosdep diagnostics ==="
+          which rosdep || true
+          rosdep --version || true
+          python3 --version || true
+          uname -a || true
+
           sudo apt-get update
+          # Keep rosdep present even if setup-ros behavior changes.
+          sudo apt-get install -y python3-rosdep || true
           # Some fresh runners need rosdep initialization.
           sudo rosdep init || true
-          rosdep update
-          rosdep install --from-paths ros_ws/src --ignore-src -r -y
+          retry "rosdep update"
+          # Verbose output helps pinpoint unresolved keys in CI logs.
+          rosdep install --from-paths ros_ws/src --ignore-src -r -y -v
 
       - name: Build (selected packages)
         shell: bash

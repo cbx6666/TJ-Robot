@@ -16,7 +16,8 @@
 ## RGBD + YOLO Focus
 
 - This stage keeps RGBD robot simulation and YOLO recognition.
-- Legacy mapping/navigation flows (SLAM/Nav2/coverage patrol) are removed from active runtime paths.
+- Laser SLAM mapping is an active runtime path (for example via `scripts/run_mapping.sh`).
+- Legacy Nav2/coverage patrol flows are not part of the current active runtime path.
 
 ## Data Outputs
 
@@ -29,6 +30,8 @@ Generated logs/results belong to `data/`:
 
 - Add unit tests for pure logic under package-local `test/`.
 - CI workflow: `.github/workflows/ros2-ci.yml`.
+- Runtime entry scripts under `scripts/` auto-source ROS/workspace setup when available (`common.sh`), so manual sourcing is not required before running `run_*.sh`.
+- If running `colcon` directly in terminal, source ROS setup manually first.
 - Local sanity flow:
 
 ```bash
