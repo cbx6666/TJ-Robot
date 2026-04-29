@@ -23,16 +23,20 @@ jobs:
         run: |
           set -euxo pipefail
           retry() {
-            local n=0
-            local max="${2:-3}"
-            local delay="${3:-5}"
-            until "$1"; do
-              n=$((n + 1))
+            local max="${1:-3}"
+            local delay="${2:-5}"
+            shift 2
+            local n=1
+            while true; do
+              if "$@"; then
+                return 0
+              fi
               if [[ "${n}" -ge "${max}" ]]; then
-                echo "ERROR: command failed after ${max} attempts: $1" >&2
+                echo "ERROR: command failed after ${max} attempts: $*" >&2
                 return 1
               fi
-              echo "Retry ${n}/${max} for: $1"
+              echo "Retry ${n}/${max} for: $*"
+              n=$((n + 1))
               sleep "${delay}"
             done
           }
@@ -48,7 +52,7 @@ jobs:
           sudo apt-get install -y python3-rosdep || true
           # Some fresh runners need rosdep initialization.
           sudo rosdep init || true
-          retry "rosdep update"
+          retry 3 5 rosdep update
           # Verbose output helps pinpoint unresolved keys in CI logs.
           rosdep install --from-paths ros_ws/src --ignore-src -r -y -v
 
