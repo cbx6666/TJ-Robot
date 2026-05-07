@@ -1,31 +1,42 @@
-将本地权重放在本目录，例如：
+human_yolo_seg 模型目录说明
+============================
+
+1. 目录用途
+
+本目录用于保存 `human_yolo_seg` 包运行所需的本地模型权重文件。
+
+2. 默认文件
+
+默认权重文件名为：
+
   yolo26n-seg.pt
 
-保存后执行：cd ros_ws && colcon build --packages-select human_yolo_seg
-安装后节点默认会加载 share/human_yolo_seg/models/yolo26n-seg.pt
+3. 使用方式
 
-也可用绝对路径启动：ros2 launch ... model_path:=/完整路径/yolo26n-seg.pt
+将权重文件放入本目录后，可重新构建工作区：
 
-----------------------------------------------------------------------
-【给做 Gazebo 人物模型 / 贴图的同学：怎么验收「能被 YOLO 当成人」】
+  cd ros_ws
+  colcon build --packages-select human_yolo_seg
 
-本节点用的是 COCO 的 person 类别（日常照片里那种人形），不是「任意人形网格」
-都一定能过。验收看的是：机器人相机拍到的 RGB 画面里，是否像「可见的人」。
+构建完成后，节点默认会从以下安装路径加载权重：
 
-推荐流程（仿真已开、TB3_STACK_MODE=assist 或单独起了 yolo_person_seg）：
+  share/human_yolo_seg/models/yolo26n-seg.pt
 
-1) 终端监听（最简单）
-   source /opt/ros/humble/setup.bash && source ros_ws/install/setup.bash
-   ros2 topic echo /human_yolo/person_present   # true = 当前帧检出 person
-   ros2 topic echo /human_yolo/person_count     # 检出框数量
-   ros2 topic echo /human_yolo/person_max_conf  # 最高置信度 0~1
+也可以在启动时通过参数显式指定绝对路径，例如：
 
-2) 人类可读 Watch（每秒一行中文说明）
-   ros2 run human_yolo_seg yolo_person_watch
+  ros2 launch human_yolo_seg yolo_person_seg.launch.py model_path:=/absolute/path/yolo26n-seg.pt
 
-3) 图像确认（最直观）
-   RViz：Add → Image → /human_yolo/annotated_image（Reliability 可设 Best effort）
-   有分割/框叠在人物上即说明模型在该视角、该光照下可被当前权重识别。
+4. 验证建议
 
-若长期 person_present=false：调整人物在相机中的大小与角度、场景光照、材质颜色；
-或略降低 launch 参数 conf_threshold；仍不行则需换更大分割模型（model_path）。
+若需要验证人物模型在仿真中的检测效果，可重点检查：
+
+- `/human_yolo/person_present`
+- `/human_yolo/person_count`
+- `/human_yolo/person_max_conf`
+- `/human_yolo/annotated_image`
+
+必要时可使用：
+
+  ros2 run human_yolo_seg yolo_person_watch
+
+对检测结果进行终端观察。

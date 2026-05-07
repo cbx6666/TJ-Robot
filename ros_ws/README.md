@@ -1,50 +1,57 @@
-# ROS 2 工作区（ros_ws）
+# ros_ws
 
-所有功能包在 **`src/`** 下；改代码后需 **`colcon build`** 再 `source install/setup.bash`。
-`src` 内部分层约定见：**[`src/README.md`](src/README.md)**。
+## 1. 工作区定位
 
-**全仓库「功能 → 路径」总索引**（含脚本与任务单）：**[../docs/代码与功能索引.md](../docs/代码与功能索引.md)**
+`ros_ws/` 是本项目的 ROS 2 工作区。  
+所有需要通过 `colcon build` 构建、通过 `ros2 run` 或 `ros2 launch` 调用的 ROS 包，都统一维护在 `ros_ws/src/` 中。
 
-## 包一览
+## 2. 目录说明
 
-| 包 | 内容 | 包内说明 |
-|----|------|----------|
-| **robot_bringup** | Launch、world、RGBD 相关辅助脚本 | [robot_bringup/README.md](src/robot_bringup/README.md) |
-| **human_yolo_seg** | YOLO 识别节点与可视化输出 | [human_yolo_seg/README.md](src/human_yolo_seg/README.md) |
-| **robot_interfaces** | 跨包消息契约（`TaskStatus`、`PersonRegion*` 等） | — |
-| **robot_tasks** | 任务管理节点（当前含心跳状态发布） | — |
-| **robot_interaction** | 语音输入网关与 LLM 路由接口 | [robot_interaction/README.md](src/robot_interaction/README.md) |
-| **robot_manipulation** | mock 抓取/放置语义执行接口 | [robot_manipulation/README.md](src/robot_manipulation/README.md) |
+```text
+ros_ws/
+├── src/        ROS 2 包源码
+├── build/      colcon 构建产物
+├── install/    安装空间
+└── log/        构建日志
+```
 
-## 编译
+其中：
+
+- `src/` 是唯一需要长期维护的源码目录
+- `build/`、`install/`、`log/` 均为生成产物
+
+## 3. 构建方式
+
+推荐在工作区目录执行以下命令：
 
 ```bash
-cd <仓库根>/ros_ws
+cd ros_ws
 source /opt/ros/humble/setup.bash
 colcon build
 source install/setup.bash
 ```
 
-仅改部分包时：
+如果只构建部分包，可执行：
 
 ```bash
-colcon build --packages-select robot_bringup human_yolo_seg robot_tasks robot_interaction robot_manipulation
+colcon build --packages-select robot_bringup robot_navigation
 ```
 
-CI 会在 Linux 环境启用 `robot_interfaces` 的 rosidl 生成（`ROBOT_INTERFACES_ENABLE_ROSIDL=ON`）。
+## 4. 运行关系
 
-## 与 `tb3_stack.sh` 配合
+工作区中的 ROS 包通常通过仓库顶层 `scripts/` 调用，而不是在 `ros_ws/` 中手工维护长命令。职责分层如下：
 
-先在本机起栈（仓库根目录）：
+- `ros_ws/src/*`：定义节点、launch、参数、资源
+- `scripts/*`：封装标准启动入口
 
-```bash
-TB3_STACK_MODE=assist TB3_ASSIST_SCAN_FILTER=1 bash scripts/tb3_stack.sh start
-```
+例如：
 
-起完整链路（需在仓库根目录）：
+- `scripts/run_simulation.sh`：默认仿真入口
+- `scripts/run_mapping.sh`：建图入口
+- `scripts/run_nav2.sh`：导航入口
 
-```bash
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-bash ../scripts/run_full_system.sh
-```
+## 5. 维护注意事项
+
+- 不要把 `install/` 下文件当作主源码修改
+- 每次修改 ROS 包源码后，都应重新构建并重新 source 环境
+- 若运行行为与源码不一致，应优先检查工作区是否重新构建

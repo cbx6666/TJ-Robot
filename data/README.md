@@ -1,10 +1,20 @@
 # data
 
-Generated logs, results, datasets, and recordings live here.
+## 1. 目录定位
 
-- `logs`: runtime logs from scripts and experiments.
-- `results`: metrics and experiment reports.
-- `datasets`: reusable offline inputs.
-- `recordings`: rosbag or media recordings.
+`data/` 用于保存仓库运行过程中产生的非源码数据，包括日志、结果文件和临时输出。  
+该目录不承载功能实现，不应存放需要通过版本控制长期维护的业务代码。
 
-Large generated files are ignored by git; each directory keeps only `.gitkeep`.
+## 2. 推荐内容
+
+典型内容包括：
+
+- `logs/`：运行日志、调试日志、启动日志
+- `results/`：实验结果、导出文件、中间产物
+- 其他临时输出：仅用于本地调试或阶段性验证
+
+## 3. 使用原则
+
+- 可以保留必要的目录结构，便于脚本直接输出
+- 不建议在此目录中继续扩展复杂手工维护内容
+- 如某类产物需要长期沉淀，应单独设计稳定目录与命名规范
