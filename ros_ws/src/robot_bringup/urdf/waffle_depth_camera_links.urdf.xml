@@ -1,0 +1,17 @@
+  <!--
+    必须与 prepare_assist_waffle_sdf.py 中(camera_depth_joint 父=camera_rgb_frame、零偏移)一致，
+    否则 camera_depth_optical_frame 只靠 Gazebo 侧 TF，与 robot_state_publisher 树不一致，
+    深度 → map 会得到错误高度乃至“飘在空中”。
+  -->
+  <link name="camera_depth_frame"/>
+  <joint name="camera_depth_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="camera_rgb_frame"/>
+    <child link="camera_depth_frame"/>
+  </joint>
+  <link name="camera_depth_optical_frame"/>
+  <joint name="camera_depth_optical_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="-1.5707963267948966 0 -1.5707963267948966"/>
+    <parent link="camera_depth_frame"/>
+    <child link="camera_depth_optical_frame"/>
+  </joint>

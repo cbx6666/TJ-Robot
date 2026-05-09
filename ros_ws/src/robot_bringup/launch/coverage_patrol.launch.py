@@ -1,4 +1,4 @@
-﻿# pyright: reportMissingImports=false
+# pyright: reportMissingImports=false
 """Launch coverage_patrol after tb3_stack.sh has started the sim stack.
 
 slam_toolbox may use /scan_filtered for mapping; coverage_patrol uses raw /scan.
@@ -58,7 +58,7 @@ def generate_launch_description():
         DeclareLaunchArgument('snapshot_overlay_from_cloud_if_no_regions', default_value='true'),
         DeclareLaunchArgument(
             'person_laser_map_cloud_topic',
-            default_value='/human_yolo/person_laser_map_cloud',
+            default_value='/yolo_objects/obstacle_laser_map_cloud',
         ),
         Node(
             package='robot_navigation',

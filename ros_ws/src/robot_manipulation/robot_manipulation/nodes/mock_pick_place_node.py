@@ -66,7 +66,11 @@ class MockPickPlaceNode(Node):
         if not text:
             return
         if text.startswith("PICK:"):
-            self._default_object = text.split(":", 1)[1].strip() or self._default_object
+            payload = text.split(":", 1)[1].strip()
+            obj = payload.split(";", 1)[0].strip()
+            self._default_object = obj or self._default_object
+            if ";" in payload:
+                self._publish_status(f"[manipulation] target_hint: {payload}")
             self._on_pick(Trigger.Request(), Trigger.Response())
         elif text.startswith("PLACE"):
             self._on_place(Trigger.Request(), Trigger.Response())

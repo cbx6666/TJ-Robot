@@ -2,7 +2,7 @@
 <package format="3">
   <name>human_yolo_seg</name>
   <version>0.0.1</version>
-  <description>YOLO instance segmentation (COCO person by default) on camera images for dynamic obstacle prep.</description>
+  <description>YOLO-Seg multi-class object localization, map markers, RViz topics under /yolo_objects by default.</description>
   <maintainer email="dev@example.com">TJ-Robot</maintainer>
   <license>MIT</license>
 

@@ -11,13 +11,15 @@ require_ros
 source_workspace_if_available
 prepare_output_dirs
 
-TB3_MODEL="${TURTLEBOT3_MODEL:-waffle}"
+# 使用 TB3_MODEL 作为显式入口，避免终端残留 TURTLEBOT3_MODEL=burger 污染导航启动。
+TB3_MODEL="${TB3_MODEL:-waffle}"
 MAP_FILE="${MAP_FILE:-${ROS_WS}/src/robot_bringup/maps/map.yaml}"
 PARAMS_FILE="${PARAMS_FILE:-${ROS_WS}/src/robot_navigation/config/nav2_params.yaml}"
 NAV_LOG_DIR="${TB3_LOG_DIR:-${PROJECT_ROOT}/data/logs/navigation}"
 RVIZ_ENABLED="${TB3_ENABLE_RVIZ:-1}"
 GZCLIENT_ENABLED="${TB3_ENABLE_GZCLIENT:-1}"
 DEFAULT_NAV2_RVIZ="/opt/ros/humble/share/nav2_bringup/rviz/nav2_default_view.rviz"
+NAV_LAUNCH_FILE="${ROS_WS}/src/robot_navigation/launch/navigation.launch.py"
 NAV_LAUNCH_PID=""
 
 cleanup() {
@@ -50,6 +52,13 @@ if [[ ! -f "${PARAMS_FILE}" ]]; then
   exit 1
 fi
 
+if [[ ! -f "${NAV_LAUNCH_FILE}" ]]; then
+  echo "ERROR: navigation launch file not found: ${NAV_LAUNCH_FILE}" >&2
+  exit 1
+fi
+
+NAV2_MAP_FILE="$(tj_nav2_map_yaml_ascii_workdir "${MAP_FILE}")/$(basename "${MAP_FILE}")"
+
 export TURTLEBOT3_MODEL="${TB3_MODEL}"
 export TB3_STACK_MODE="${TB3_STACK_MODE:-laser}"
 export TB3_ENABLE_SLAM=0
@@ -71,8 +80,10 @@ fi
 echo "[run_nav2] project_root=${PROJECT_ROOT}"
 echo "[run_nav2] workspace=${ROS_WS}"
 echo "[run_nav2] model=${TURTLEBOT3_MODEL}"
-echo "[run_nav2] map=${MAP_FILE}"
+echo "[run_nav2] map_source=${MAP_FILE}"
+echo "[run_nav2] map_nav2=${NAV2_MAP_FILE}"
 echo "[run_nav2] params=${PARAMS_FILE}"
+echo "[run_nav2] launch=${NAV_LAUNCH_FILE}"
 echo "[run_nav2] rviz_config=${RVIZ_CONFIG_FILE}"
 echo "[run_nav2] log_dir=${TB3_LOG_DIR}"
 
@@ -80,9 +91,9 @@ echo "[1/2] Starting Gazebo + robot base"
 bash "${PROJECT_ROOT}/scripts/tb3_stack.sh" start
 
 echo "[2/2] Starting Nav2 localization + navigation stack"
-ros2 launch robot_navigation navigation.launch.py \
+ros2 launch "${NAV_LAUNCH_FILE}" \
   "use_sim_time:=true" \
-  "map:=${MAP_FILE}" \
+  "map:=${NAV2_MAP_FILE}" \
   "params_file:=${PARAMS_FILE}" \
   >"${TB3_LOG_DIR}/nav2.launch.log" 2>&1 &
 NAV_LAUNCH_PID=$!

@@ -132,7 +132,7 @@ Visualization Manager:
       Topic:
         Depth: 5
         Durability Policy: Volatile
-        Filter size: 10
+        Filter size: 30
         History Policy: Keep Last
         Reliability Policy: Best Effort
         Value: /scan
@@ -140,19 +140,19 @@ Visualization Manager:
       Use rainbow: true
       Value: true
     - Class: rviz_default_plugins/Image
-      Enabled: false
+      Enabled: true
       Max Value: 1
       Median window: 5
       Min Value: 0
-      Name: YOLO (/human_yolo/annotated_image)
+      Name: YOLO (/yolo_objects/annotated_image)
       Normalize Range: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
-        Value: /human_yolo/annotated_image
-      Value: false
+        Value: /yolo_objects/annotated_image
+      Value: true
     - Angle Tolerance: 0.10000000149011612
       Class: rviz_default_plugins/Odometry
       Covariance:
@@ -201,7 +201,7 @@ Visualization Manager:
       Topic:
         Depth: 10
         Durability Policy: Transient Local
-        Filter size: 10
+        Filter size: 40
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /map
@@ -213,8 +213,36 @@ Visualization Manager:
         Value: /map_updates
       Use Timestamp: false
       Value: true
+    - Class: rviz_default_plugins/PointStamped
+      Color: 25; 255; 0
+      Enabled: true
+      History Length: 1
+      Name: Target Point (/yolo_objects/target_point_map)
+      Radius: 0.11999999731779099
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /yolo_objects/target_point_map
+      Value: true
     - Alpha: 1
-      Class: rviz_default_plugins/RobotModel
+      Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: YOLO Objects (map markers)
+      Namespaces:
+        {}
+      Topic:
+        Depth: 10
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /yolo_objects/target_objects_marker
+      Value: true
+    - Class: rviz_default_plugins/RobotModel
+      Alpha: 1
       Collision Enabled: false
       Description File: ""
       Description Source: Topic
@@ -380,5 +408,5 @@ Window Geometry:
   Width: 1200
   X: 320
   Y: 189
-  YOLO (/human_yolo/annotated_image):
+  YOLO (/yolo_objects/annotated_image):
     collapsed: false

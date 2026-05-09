@@ -1,5 +1,5 @@
 # pyright: reportMissingImports=false
-"""从 /human_yolo/person_laser_map_cloud（map 系、Transient Local）拉一帧点云，写成与 person_strip_recorder 同格式的 regions YAML。
+"""从 obstacle_laser_map_cloud（默认 /yolo_objects/obstacle_laser_map_cloud）拉一帧点云，写成 regions YAML。
 
 用于未起 person_strip_recorder 时，仍可用 annotate_saved_map_person_overlay 在存图上叠人物点。
 在 RViz 里该话题与 LaserScan 一样叠在地图上（PointCloud2 + Fixed Frame=map）。"""
@@ -80,7 +80,7 @@ class _SnapNode(Node):
             'output_path',
             str(Path.home() / '.ros' / 'tj_person_regions_cloud_snapshot.yaml'),
         )
-        self.declare_parameter('cloud_topic', '/human_yolo/person_laser_map_cloud')
+        self.declare_parameter('cloud_topic', '/yolo_objects/obstacle_laser_map_cloud')
         self.declare_parameter('timeout_sec', 10.0)
         self.declare_parameter('strip_radius_m', 0.08)
         self.declare_parameter('dedupe_grid_m', 0.05)

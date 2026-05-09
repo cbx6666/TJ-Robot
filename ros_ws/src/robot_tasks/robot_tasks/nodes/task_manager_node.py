@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import rclpy
+from geometry_msgs.msg import PointStamped
 from rclpy.node import Node
 from std_msgs.msg import String
 
@@ -23,6 +24,8 @@ class TaskManagerNode(Node):
         self.declare_parameter("status_topic", "/task/status")
         self.declare_parameter("goal_text_topic", "/task/goal_text")
         self.declare_parameter("manipulation_command_topic", "/manipulation/command_text")
+        self.declare_parameter("target_point_topic", "/yolo_objects/target_point_map")
+        self.declare_parameter("target_label_topic", "/yolo_objects/target_label")
         self.declare_parameter("heartbeat_sec", 2.0)
         self.declare_parameter("task_id", "bootstrap")
 
@@ -30,12 +33,18 @@ class TaskManagerNode(Node):
         self._task_id = str(self.get_parameter("task_id").value)
         self._goal_text_topic = str(self.get_parameter("goal_text_topic").value)
         self._mani_command_topic = str(self.get_parameter("manipulation_command_topic").value)
+        self._target_point_topic = str(self.get_parameter("target_point_topic").value)
+        self._target_label_topic = str(self.get_parameter("target_label_topic").value)
         heartbeat_sec = max(float(self.get_parameter("heartbeat_sec").value), 0.2)
+        self._latest_target_point: PointStamped | None = None
+        self._latest_target_label = ""
 
         self._status_pub = None
         self._status_str_pub = self.create_publisher(String, f"{self._status_topic}_text", 10)
         self._mani_cmd_pub = self.create_publisher(String, self._mani_command_topic, 10)
         self.create_subscription(String, self._goal_text_topic, self._on_goal_text, 10)
+        self.create_subscription(PointStamped, self._target_point_topic, self._on_target_point, 10)
+        self.create_subscription(String, self._target_label_topic, self._on_target_label, 10)
         if TaskStatus is not None:
             self._status_pub = self.create_publisher(TaskStatus, self._status_topic, 10)
             self.get_logger().info(
@@ -50,7 +59,7 @@ class TaskManagerNode(Node):
         self.create_timer(heartbeat_sec, self._publish_heartbeat)
         self.get_logger().info(
             f"task_manager subscriptions: goal={self._goal_text_topic}; "
-            f"outputs manipulation={self._mani_command_topic}"
+            f"target={self._target_point_topic}; outputs manipulation={self._mani_command_topic}"
         )
 
     def _publish_heartbeat(self) -> None:
@@ -83,9 +92,28 @@ class TaskManagerNode(Node):
         # Minimal rule-based orchestration scaffold:
         # focus on object pick/place semantics for RGBD + YOLO stage.
         obj = self._infer_object(text)
+        coord = self._latest_target_coord_text()
         if obj:
-            self._mani_cmd_pub.publish(String(data=f"PICK:{obj}"))
-        self._publish_status_event("EXECUTING", f"goal={text} object={obj or 'NA'}")
+            if coord:
+                self._mani_cmd_pub.publish(String(data=f"PICK:{obj};{coord}"))
+            else:
+                self._mani_cmd_pub.publish(String(data=f"PICK:{obj}"))
+        self._publish_status_event(
+            "EXECUTING", f"goal={text} object={obj or 'NA'} target={coord or 'NA'}"
+        )
+
+    def _on_target_point(self, msg: PointStamped) -> None:
+        self._latest_target_point = msg
+
+    def _on_target_label(self, msg: String) -> None:
+        self._latest_target_label = msg.data.strip()
+
+    def _latest_target_coord_text(self) -> str:
+        if self._latest_target_point is None:
+            return ""
+        pt = self._latest_target_point.point
+        frame = self._latest_target_point.header.frame_id or "map"
+        return f"target_frame={frame};target_xyz={pt.x:.3f},{pt.y:.3f},{pt.z:.3f}"
 
     @staticmethod
     def _infer_object(text: str) -> str:
