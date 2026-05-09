@@ -44,6 +44,9 @@ NAV2_MAP_FILE="$(tj_nav2_map_yaml_ascii_workdir "${MAP_FILE}")/$(basename "${MAP
 echo "Starting simulation stack (static-map mode): model=${TURTLEBOT3_MODEL}, mode=${TB3_STACK_MODE}, rgbd_bridge=${TB3_ASSIST_RGBD_BRIDGE}, yolo=${TB3_ASSIST_SCAN_FILTER}"
 bash "${PROJECT_ROOT}/scripts/tb3_stack.sh" start
 
+echo "Stopping duplicate Nav2 from previous runs (if any) ..."
+tj_kill_nav2_background_launch
+
 echo "Starting Nav2 with static map: ${MAP_FILE} -> ${NAV2_MAP_FILE} (ASCII workdir avoids launch path mangling)"
 ROS_SETUP_BASH="${ROS_SETUP_BASH:-/opt/ros/humble/setup.bash}"
 WS_SETUP_BASH="${PROJECT_ROOT}/ros_ws/install/setup.bash"
@@ -62,6 +65,12 @@ WS_SETUP_BASH="${PROJECT_ROOT}/ros_ws/install/setup.bash"
   exec ros2 launch "${NAV_LAUNCH_FILE}" \
     "use_sim_time:=true" \
     "map:=${NAV2_MAP_FILE}" \
-    "params_file:=${PARAMS_FILE}"
+    "params_file:=${PARAMS_FILE}" \
+    "defer_navigation_autostart:=true"
 ) >"${TB3_LOG_DIR}/nav2.launch.log" 2>&1 &
 echo "Nav2 started in background (PID=$!). Logs: ${TB3_LOG_DIR}/nav2.launch.log"
+(
+  set +e
+  tj_nav2_trigger_navigation_manager_startup_after_map_server
+) >>"${TB3_LOG_DIR}/nav2_deferred_navigation.log" 2>&1 &
+echo "Deferred navigation lifecycle STARTUP helper started (log: ${TB3_LOG_DIR}/nav2_deferred_navigation.log)"

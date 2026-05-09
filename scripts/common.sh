@@ -72,3 +72,57 @@ tj_nav2_map_yaml_ascii_workdir() {
   cp -a "${maps_dir}/." "${dest_dir}/"
   echo "${dest_dir}"
 }
+
+# 结束前一次后台拉的 Nav2（run_simulation 每次都会再起一条 ros2 launch，不杀会叠多套 /amcl）。
+tj_kill_nav2_background_launch() {
+  echo "tj_kill_nav2_background_launch: 结束残留的 Nav2 launch ..."
+  pkill -f 'navigation\.launch\.py' 2>/dev/null || true
+  pkill -f 'tj_static_map_nav2\.launch\.py' 2>/dev/null || true
+  sleep 1
+}
+
+# 配合 navigation.launch.py 的 defer_navigation_autostart:=true：等 map_server 进入 active 后，对
+# lifecycle_manager_navigation 调用 manage_nodes(STARTUP)。避免 localization 与 navigation 同时
+# autostart 时 map_server configure 卡住，导致永远没有 map TF。
+tj_nav2_trigger_navigation_manager_startup_after_map_server() {
+  local max_map_wait="${NAV2_MAP_SERVER_ACTIVE_WAIT_SEC:-120}"
+  local ros_setup="${ROS_SETUP_BASH:-/opt/ros/humble/setup.bash}"
+  local ws_setup="${ROS_WS}/install/setup.bash"
+  if [[ ! -f "${ros_setup}" ]]; then
+    echo "tj_nav2_trigger_navigation_manager_startup_after_map_server: missing ${ros_setup}" >&2
+    return 1
+  fi
+  safe_source "${ros_setup}"
+  if [[ ! -f "${ws_setup}" ]]; then
+    echo "tj_nav2_trigger_navigation_manager_startup_after_map_server: missing ${ws_setup}" >&2
+    return 1
+  fi
+  safe_source "${ws_setup}"
+
+  local i=0
+  while (( i < max_map_wait )); do
+    if ros2 lifecycle get /map_server 2>/dev/null | grep -qF "State: active"; then
+      break
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  if (( i >= max_map_wait )); then
+    echo "tj_nav2_trigger_navigation_manager_startup_after_map_server: timeout waiting for map_server active" >&2
+    return 1
+  fi
+
+  i=0
+  while (( i < 120 )); do
+    if ros2 service list 2>/dev/null | grep -Fxq "/lifecycle_manager_navigation/manage_nodes"; then
+      if ros2 service call /lifecycle_manager_navigation/manage_nodes nav2_msgs/srv/ManageLifecycleNodes "{command: 1}"; then
+        echo "tj_nav2_trigger_navigation_manager_startup_after_map_server: navigation STARTUP ok"
+        return 0
+      fi
+    fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+  echo "tj_nav2_trigger_navigation_manager_startup_after_map_server: failed to call manage_nodes STARTUP" >&2
+  return 1
+}

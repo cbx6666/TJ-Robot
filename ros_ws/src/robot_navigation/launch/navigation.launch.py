@@ -2,9 +2,14 @@ import os
 from pathlib import Path
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import (
+    EqualsSubstitution,
+    LaunchConfiguration,
+    PathJoinSubstitution,
+)
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -23,6 +28,11 @@ def generate_launch_description() -> LaunchDescription:
     map_file = LaunchConfiguration("map")
     params_file = LaunchConfiguration("params_file")
     use_composition = LaunchConfiguration("use_composition")
+    defer_navigation_autostart = LaunchConfiguration("defer_navigation_autostart")
+
+    nav2_bringup_launch_dir = PathJoinSubstitution(
+        [FindPackageShare("nav2_bringup"), "launch"]
+    )
 
     return LaunchDescription(
         [
@@ -47,20 +57,78 @@ def generate_launch_description() -> LaunchDescription:
                 default_value="False",
                 description="必须为 Python 识别的 True/False。False=各节点独立进程，避免 map_server 生命周期竞态",
             ),
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    PathJoinSubstitution(
-                        [FindPackageShare("nav2_bringup"), "launch", "bringup_launch.py"]
-                    )
+            DeclareLaunchArgument(
+                "defer_navigation_autostart",
+                default_value="false",
+                description=(
+                    "true：拆成 localization + navigation 两次 include，且 navigation 的 "
+                    "lifecycle_manager 不 autostart，须由脚本在 map_server active 后调用 "
+                    "manage_nodes STARTUP，避免与 navigation 并行配置时 map_server 卡死、无 map TF"
                 ),
-                launch_arguments={
-                    "slam": "False",
-                    "use_sim_time": use_sim_time,
-                    "map": map_file,
-                    "params_file": params_file,
-                    "autostart": "True",
-                    "use_composition": use_composition,
-                }.items(),
+            ),
+            GroupAction(
+                actions=[
+                    IncludeLaunchDescription(
+                        PythonLaunchDescriptionSource(
+                            PathJoinSubstitution(
+                                [nav2_bringup_launch_dir, "bringup_launch.py"]
+                            )
+                        ),
+                        launch_arguments={
+                            "slam": "False",
+                            "use_sim_time": use_sim_time,
+                            "map": map_file,
+                            "params_file": params_file,
+                            "autostart": "True",
+                            "use_composition": use_composition,
+                        }.items(),
+                    ),
+                ],
+                condition=IfCondition(
+                    EqualsSubstitution(defer_navigation_autostart, "false")
+                ),
+            ),
+            GroupAction(
+                actions=[
+                    IncludeLaunchDescription(
+                        PythonLaunchDescriptionSource(
+                            PathJoinSubstitution(
+                                [nav2_bringup_launch_dir, "localization_launch.py"]
+                            )
+                        ),
+                        launch_arguments={
+                            "namespace": "",
+                            "map": map_file,
+                            "use_sim_time": use_sim_time,
+                            "autostart": "True",
+                            "params_file": params_file,
+                            "use_composition": use_composition,
+                            "use_respawn": "False",
+                            "container_name": "nav2_container",
+                            "log_level": "info",
+                        }.items(),
+                    ),
+                    IncludeLaunchDescription(
+                        PythonLaunchDescriptionSource(
+                            PathJoinSubstitution(
+                                [nav2_bringup_launch_dir, "navigation_launch.py"]
+                            )
+                        ),
+                        launch_arguments={
+                            "namespace": "",
+                            "use_sim_time": use_sim_time,
+                            "autostart": "False",
+                            "params_file": params_file,
+                            "use_composition": use_composition,
+                            "use_respawn": "False",
+                            "container_name": "nav2_container",
+                            "log_level": "info",
+                        }.items(),
+                    ),
+                ],
+                condition=IfCondition(
+                    EqualsSubstitution(defer_navigation_autostart, "true")
+                ),
             ),
         ]
     )
