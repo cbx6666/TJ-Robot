@@ -145,12 +145,12 @@ Visualization Manager:
       Median window: 5
       Min Value: 0
       Name: YOLO (/yolo_objects/annotated_image)
-      Normalize Range: true
+      Normalize Range: false
       Topic:
-        Depth: 5
+        Depth: 10
         Durability Policy: Volatile
         History Policy: Keep Last
-        Reliability Policy: Best Effort
+        Reliability Policy: Reliable
         Value: /yolo_objects/annotated_image
       Value: true
     - Angle Tolerance: 0.10000000149011612
@@ -222,7 +222,7 @@ Visualization Manager:
       Topic:
         Depth: 5
         Durability Policy: Volatile
-        Filter size: 10
+        Filter size: 25
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /yolo_objects/target_point_map
@@ -236,7 +236,7 @@ Visualization Manager:
       Topic:
         Depth: 10
         Durability Policy: Volatile
-        Filter size: 10
+        Filter size: 35
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /yolo_objects/target_objects_marker

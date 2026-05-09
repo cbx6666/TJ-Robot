@@ -22,7 +22,7 @@ from ament_index_python.packages import PackageNotFoundError, get_package_share_
 from geometry_msgs.msg import PointStamped
 from rclpy.duration import Duration
 from rclpy.node import Node
-from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
+from rclpy.qos import DurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image, JointState
 from std_msgs.msg import Bool, ColorRGBA, Float32, Int32, String
@@ -202,12 +202,14 @@ class YoloObjectSegNode(Node):
             reliability=QoSReliabilityPolicy.RELIABLE,
             history=QoSHistoryPolicy.KEEP_LAST,
         )
+        # 输出图：用 Reliable。RViz2 Image 常见默认 Reliable；若发布端为 Best Effort 则 QoS 不兼容 → 一直 No image，
+        # 而 ros2 topic hz/echo 可能仍能看到（工具侧订阅配置不同）。depth 略大以缓冲 1080p + 慢推理。
         _pub_qos = QoSProfile(
-            depth=5,
-            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            depth=10,
+            reliability=QoSReliabilityPolicy.RELIABLE,
             history=QoSHistoryPolicy.KEEP_LAST,
+            durability=DurabilityPolicy.VOLATILE,
         )
-        # 须与 RViz Image 插件默认(Best Effort)一致；勿用裸整数 depth（默认可靠性常为 Reliable）。
         self._pub = self.create_publisher(Image, out_topic, _pub_qos)
         self._pub_stats = bool(
             self.get_parameter("publish_detection_stats").get_parameter_value().bool_value
@@ -549,22 +551,28 @@ class YoloObjectSegNode(Node):
     def _project_to_map(self, pt_cam: PointStamped) -> PointStamped | None:
         if self._tf_buffer_3d is None or not self._target_frame:
             return None
-        try:
-            trans = self._tf_buffer_3d.lookup_transform(
-                self._target_frame,
-                pt_cam.header.frame_id,
-                Time.from_msg(pt_cam.header.stamp),
-                timeout=Duration(seconds=0, nanoseconds=250_000_000),
-            )
-            return do_transform_point(pt_cam, trans)
-        except Exception as e:
+        # 先按传感器时间戳查 TF；仿真里与 /tf 时间微偏时易失败 -> map_xyz 空、RViz 无球体。再试 Time()=最新变换。
+        attempts: tuple[Time, ...] = (Time.from_msg(pt_cam.header.stamp), Time())
+        last_err: Exception | None = None
+        for when in attempts:
+            try:
+                trans = self._tf_buffer_3d.lookup_transform(
+                    self._target_frame,
+                    pt_cam.header.frame_id,
+                    when,
+                    timeout=Duration(seconds=0, nanoseconds=250_000_000),
+                )
+                return do_transform_point(pt_cam, trans)
+            except Exception as e:
+                last_err = e
+        if last_err is not None:
             now = time.monotonic()
             if now - self._last_depth_warn_mono > 2.0:
                 self._last_depth_warn_mono = now
                 self.get_logger().warning(
-                    f"3D点TF变换失败 {pt_cam.header.frame_id}->{self._target_frame}: {e}"
+                    f"3D点TF变换失败 {pt_cam.header.frame_id}->{self._target_frame}: {last_err}"
                 )
-                return None
+        return None
 
     @staticmethod
     def _rgba_for_class_id(cls_id: int) -> ColorRGBA:
@@ -585,21 +593,23 @@ class YoloObjectSegNode(Node):
         c.a = 0.9
         return c
 
-    def _publish_track_marker_array(self, stamp, now_sec: float) -> None:
+    def _publish_track_marker_array(self, now_sec: float) -> None:
         pub = self._pub_track_markers
         if pub is None:
             return
+        # 用当前仿真/墙钟时间，避免 Fixed Frame=map 时 RViz 按旧图像 stamp 做 TF 过滤丢 Marker
+        mstamp = self.get_clock().now().to_msg()
         ma = MarkerArray()
         clr_sphere = Marker()
         clr_sphere.header.frame_id = self._target_frame
-        clr_sphere.header.stamp = stamp
+        clr_sphere.header.stamp = mstamp
         clr_sphere.ns = "yolo_obj_sphere"
         clr_sphere.action = Marker.DELETEALL
         ma.markers.append(clr_sphere)
 
         clr_text = Marker()
         clr_text.header.frame_id = self._target_frame
-        clr_text.header.stamp = stamp
+        clr_text.header.stamp = mstamp
         clr_text.ns = "yolo_obj_label"
         clr_text.action = Marker.DELETEALL
         ma.markers.append(clr_text)
@@ -618,7 +628,7 @@ class YoloObjectSegNode(Node):
 
             sph = Marker()
             sph.header.frame_id = self._target_frame
-            sph.header.stamp = stamp
+            sph.header.stamp = mstamp
             sph.ns = "yolo_obj_sphere"
             sph.id = int(tid)
             sph.type = Marker.SPHERE
@@ -636,7 +646,7 @@ class YoloObjectSegNode(Node):
 
             txt = Marker()
             txt.header.frame_id = self._target_frame
-            txt.header.stamp = stamp
+            txt.header.stamp = mstamp
             txt.ns = "yolo_obj_label"
             txt.id = int(tid)
             txt.type = Marker.TEXT_VIEW_FACING
@@ -791,7 +801,7 @@ class YoloObjectSegNode(Node):
             now_sec = time.monotonic()
             self._cleanup_tracks(now_sec)
             self._publish_track_debug(now_sec)
-            self._publish_track_marker_array(ts, now_sec)
+            self._publish_track_marker_array(now_sec)
             return
         dh, dw = int(depth_m.shape[0]), int(depth_m.shape[1])
         fx, cx, fy, cy = self._scaled_intrinsics(self._depth_cam_info, dw, dh)
@@ -854,7 +864,7 @@ class YoloObjectSegNode(Node):
             self._update_track(tid, cand, now_sec)
         primary = self._choose_primary_track(now_sec)
         self._publish_track_debug(now_sec)
-        self._publish_track_marker_array(image_msg.header.stamp, now_sec)
+        self._publish_track_marker_array(now_sec)
         if primary is None:
             return
         cam_xyz = primary.get("cam_xyz")
@@ -883,7 +893,7 @@ class YoloObjectSegNode(Node):
         if map_xyz is None:
             return
         pt_map = PointStamped()
-        pt_map.header.stamp = depth_msg.header.stamp
+        pt_map.header.stamp = self.get_clock().now().to_msg()
         pt_map.header.frame_id = self._target_frame
         pt_map.point.x = float(map_xyz[0])
         pt_map.point.y = float(map_xyz[1])
