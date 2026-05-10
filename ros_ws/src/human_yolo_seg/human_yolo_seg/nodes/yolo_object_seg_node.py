@@ -1,9 +1,12 @@
 # pyright: reportMissingImports=false
-"""订阅相机 RGB，Ultralytics YOLO-Seg 定位多类物体（默认检测类别包含 COCO 的「人」(0) 与椅子 (56)）。
+"""订阅相机 RGB，Ultralytics YOLO（Seg 推荐）多类物体定位（默认 COCO「人」(0) 与椅子 (56)）。
 
 发布：标注图像、地图 MarkerArray（多目标）、主目标 PointStamped、检测统计话题（默认前缀 /yolo_objects）。
 
-默认权重文件名 yolo26n-seg.pt：放在包内 models/ 目录后 colcon build，或 model_path 传绝对路径。
+3D 深度：有实例 mask 时，框心邻域须全在 mask 内才用邻域 median 深度；否则在框垂直方向中线高度取横线，
+在 mask 上均匀采样像素取单点深度，对 3D 点与像素坐标分别取中位数。纯检测权重无 mask 时退回框心+邻域深度。
+
+默认权重 yolo26n-seg.pt：放包内 models/ 后 colcon build，或 model_path 传绝对路径。
 """
 
 from __future__ import annotations
@@ -140,8 +143,13 @@ class YoloObjectSegNode(Node):
         self.declare_parameter("target_frame_id", "map")
         self.declare_parameter("depth_unit_divisor", 1000.0)
         self.declare_parameter("depth_min_m", 0.15)
-        self.declare_parameter("depth_max_m", 4.5)
+        # 须 >= 仿真深度 far（默认 20m）；过小会把远处有效深度全滤掉。
+        self.declare_parameter("depth_max_m", 25.0)
         self.declare_parameter("depth_sample_radius_px", 3)
+        # 有实例分割 mask 时：中心邻域须全在 mask 内才用框心深度；否则在框垂直中线高度取横线，在 mask 上均匀采样深度再取中位数。纯检测模型无 mask 时自动退回框心。
+        self.declare_parameter("target_point_use_seg_mask_depth", True)
+        self.declare_parameter("target_point_mask_line_samples", 21)
+        self.declare_parameter("target_point_mask_line_min_valid", 3)
         self.declare_parameter("max_depth_age_sec", 0.35)
         self.declare_parameter("enable_target_tracking", True)
         self.declare_parameter("track_match_max_px", 90.0)
@@ -191,19 +199,14 @@ class YoloObjectSegNode(Node):
         in_topic = self.get_parameter("image_topic").get_parameter_value().string_value
         out_topic = self.get_parameter("output_topic").get_parameter_value().string_value
 
+        # 输入相机/深度：与 Gazebo 常见 SensorData（Best Effort）对齐；若用 Reliable 订阅而仿真发 BE → 根本收不到图，
+        # 表现为 /yolo_objects/annotated_image 永不出现、tb3_stack warm-up 超时。
         qos = QoSProfile(
             depth=1,
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
             history=QoSHistoryPolicy.KEEP_LAST,
         )
-        # 与 Reliable 发布端对齐。depth=10 时推理慢会在队列里堆旧帧，越跑越「只剩约 1Hz」；depth=1 只处理最新图。
-        qos_rgb = QoSProfile(
-            depth=1,
-            reliability=QoSReliabilityPolicy.RELIABLE,
-            history=QoSHistoryPolicy.KEEP_LAST,
-        )
-        # 输出图：用 Reliable。RViz2 Image 常见默认 Reliable；若发布端为 Best Effort 则 QoS 不兼容 → 一直 No image，
-        # 而 ros2 topic hz/echo 可能仍能看到（工具侧订阅配置不同）。depth 略大以缓冲 1080p + 慢推理。
+        # 输出标注图：仍用 Reliable，便于 RViz2 Image 默认配置订阅。
         _pub_qos = QoSProfile(
             depth=10,
             reliability=QoSReliabilityPolicy.RELIABLE,
@@ -255,6 +258,15 @@ class YoloObjectSegNode(Node):
         self._depth_sample_radius_px = int(
             self.get_parameter("depth_sample_radius_px").get_parameter_value().integer_value
         )
+        self._target_point_use_seg_mask_depth = bool(
+            self.get_parameter("target_point_use_seg_mask_depth").get_parameter_value().bool_value
+        )
+        self._target_point_mask_line_samples = max(
+            3, int(self.get_parameter("target_point_mask_line_samples").get_parameter_value().integer_value)
+        )
+        self._target_point_mask_line_min_valid = max(
+            1, int(self.get_parameter("target_point_mask_line_min_valid").get_parameter_value().integer_value)
+        )
         self._max_depth_age_sec = float(
             self.get_parameter("max_depth_age_sec").get_parameter_value().double_value
         )
@@ -303,7 +315,7 @@ class YoloObjectSegNode(Node):
             camera_topic = self.get_parameter("target_point_camera_topic").get_parameter_value().string_value
             map_topic = self.get_parameter("target_point_map_topic").get_parameter_value().string_value
             label_topic = self.get_parameter("target_label_topic").get_parameter_value().string_value
-            self.create_subscription(CameraInfo, ci_topic, self._on_cam_info, qos_rgb)
+            self.create_subscription(CameraInfo, ci_topic, self._on_cam_info, qos)
             self.create_subscription(CameraInfo, depth_ci_topic, self._on_depth_cam_info, qos)
             self.create_subscription(Image, depth_topic, self._on_depth, qos)
             self._pub_target_point_camera = self.create_publisher(PointStamped, camera_topic, 10)
@@ -313,7 +325,10 @@ class YoloObjectSegNode(Node):
             self._tf_listener_3d = tf2_ros.TransformListener(self._tf_buffer_3d, self, spin_thread=True)
             self.get_logger().info(
                 f"3D目标点: depth={depth_topic}, depth_cam_info={depth_ci_topic} -> "
-                f"{camera_topic}, {map_topic} (target_frame={self._target_frame})"
+                f"{camera_topic}, {map_topic} (target_frame={self._target_frame}); "
+                f"mask_depth={self._target_point_use_seg_mask_depth}, "
+                f"line_samples={self._target_point_mask_line_samples}, "
+                f"line_min_valid={self._target_point_mask_line_min_valid}"
             )
             if self._publish_target_markers:
                 mtopic = self.get_parameter("target_objects_marker_topic").get_parameter_value().string_value
@@ -351,7 +366,7 @@ class YoloObjectSegNode(Node):
             else:
                 self._tf_buffer = None
                 self._tf_listener = None
-            self.create_subscription(CameraInfo, ci_topic, self._on_cam_info, qos_rgb)
+            self.create_subscription(CameraInfo, ci_topic, self._on_cam_info, qos)
             az_topic = self.get_parameter("target_azimuth_topic").get_parameter_value().string_value
             self._pub_azimuth = self.create_publisher(JointState, az_topic, 10)
             _mode_desc = (
@@ -381,7 +396,7 @@ class YoloObjectSegNode(Node):
                     f"方位角命令行输出: 间隔 {_iv_txt}（log_target_azimuth_to_console）"
                 )
 
-        self.create_subscription(Image, in_topic, self._on_image, qos_rgb)
+        self.create_subscription(Image, in_topic, self._on_image, qos)
         _fp16_s = "on" if self._use_fp16 and str(self._device).startswith("cuda") else "off"
         self.get_logger().info(
             f"订阅 {in_topic} -> 发布 {out_topic}；"
@@ -547,6 +562,152 @@ class YoloObjectSegNode(Node):
         if not np.any(valid):
             return None
         return float(np.median(patch[valid]))
+
+    @staticmethod
+    def _rasterize_instance_mask_polygon(poly_xy: np.ndarray, iw: int, ih: int) -> np.ndarray | None:
+        """实例多边形 → 与 RGB 对齐的 uint8 mask（1=前景）。"""
+        import cv2
+
+        if poly_xy is None or len(poly_xy) < 3:
+            return None
+        mask = np.zeros((ih, iw), dtype=np.uint8)
+        pts = np.ascontiguousarray(np.round(poly_xy).astype(np.int32)).reshape(-1, 1, 2)
+        cv2.fillPoly(mask, [pts], 1)
+        if int(mask.max()) == 0:
+            return None
+        return mask
+
+    def _neighborhood_fully_inside_mask(self, mask: np.ndarray, uc: int, vc: int, r: int) -> bool:
+        ih, iw = mask.shape[:2]
+        for dv in range(-r, r + 1):
+            for du in range(-r, r + 1):
+                uu, vv = uc + du, vc + dv
+                if uu < 0 or uu >= iw or vv < 0 or vv >= ih:
+                    return False
+                if int(mask[vv, uu]) == 0:
+                    return False
+        return True
+
+    def _depth_scalar_depth_frame(self, depth_m: np.ndarray, ud: int, vd: int) -> float | None:
+        h, w = depth_m.shape[:2]
+        if w <= 0 or h <= 0 or ud < 0 or ud >= w or vd < 0 or vd >= h:
+            return None
+        z = float(depth_m[vd, ud])
+        if not np.isfinite(z) or z < self._depth_min_m or z > self._depth_max_m:
+            return None
+        return z
+
+    @staticmethod
+    def _backproj_cam_xyz(
+        u_d: float, v_d: float, z: float, fx: float, fy: float, cx: float, cy: float
+    ) -> tuple[float, float, float]:
+        x = (float(u_d) - cx) * z / fx
+        y = (float(v_d) - cy) * z / fy
+        return x, y, z
+
+    def _fallback_box_center_depth(
+        self,
+        depth_m: np.ndarray,
+        x1: float,
+        y1: float,
+        x2: float,
+        y2: float,
+        iw: int,
+        ih: int,
+        dw: int,
+        dh: int,
+        fx: float,
+        fy: float,
+        cx: float,
+        cy: float,
+    ) -> tuple[float, float, float, float, float] | None:
+        u_rgb = float(0.5 * (x1 + x2))
+        v_rgb = float(0.5 * (y1 + y2))
+        u_d = int(round(u_rgb * float(dw) / float(iw)))
+        v_d = int(round(v_rgb * float(dh) / float(ih)))
+        u_d = max(0, min(dw - 1, u_d))
+        v_d = max(0, min(dh - 1, v_d))
+        z = self._sample_depth_from_array(depth_m, u_d, v_d)
+        if z is None:
+            return None
+        x, y, z3 = self._backproj_cam_xyz(float(u_d), float(v_d), z, fx, fy, cx, cy)
+        return u_rgb, v_rgb, x, y, z3
+
+    def _resolve_camera_xyz_with_mask(
+        self,
+        depth_m: np.ndarray,
+        mask_rgb: np.ndarray | None,
+        x1: float,
+        y1: float,
+        x2: float,
+        y2: float,
+        iw: int,
+        ih: int,
+        dw: int,
+        dh: int,
+        fx: float,
+        fy: float,
+        cx: float,
+        cy: float,
+    ) -> tuple[float, float, float, float, float] | None:
+        """返回 (u_rgb,v_rgb,x,y,z) 相机系；无可用深度时 None。"""
+        if mask_rgb is None or not self._target_point_use_seg_mask_depth:
+            return self._fallback_box_center_depth(
+                depth_m, x1, y1, x2, y2, iw, ih, dw, dh, fx, fy, cx, cy
+            )
+
+        u_c = 0.5 * (x1 + x2)
+        v_c = 0.5 * (y1 + y2)
+        uc = int(round(u_c))
+        vc = int(round(v_c))
+        r = max(0, int(self._depth_sample_radius_px))
+
+        if 0 <= uc < iw and 0 <= vc < ih and int(mask_rgb[vc, uc]) != 0:
+            neighborhood_ok = True if r == 0 else self._neighborhood_fully_inside_mask(mask_rgb, uc, vc, r)
+            if neighborhood_ok:
+                u_d = int(round(u_c * float(dw) / float(iw)))
+                v_d = int(round(v_c * float(dh) / float(ih)))
+                u_d = max(0, min(dw - 1, u_d))
+                v_d = max(0, min(dh - 1, v_d))
+                z = self._sample_depth_from_array(depth_m, u_d, v_d)
+                if z is not None:
+                    x, y, z3 = self._backproj_cam_xyz(float(u_d), float(v_d), z, fx, fy, cx, cy)
+                    return u_c, v_c, x, y, z3
+
+        y_mid = 0.5 * (y1 + y2)
+        xa, xb = float(min(x1, x2)), float(max(x1, x2))
+        n = int(self._target_point_mask_line_samples)
+        xs = np.linspace(xa, xb, num=n)
+        cam_pts: list[tuple[float, float, float]] = []
+        u_rs: list[float] = []
+        v_rs: list[float] = []
+        for xf in xs:
+            uu = int(round(float(xf)))
+            vv = int(round(float(y_mid)))
+            if uu < 0 or uu >= iw or vv < 0 or vv >= ih:
+                continue
+            if int(mask_rgb[vv, uu]) == 0:
+                continue
+            ud = int(round(uu * float(dw) / float(iw)))
+            vd = int(round(vv * float(dh) / float(ih)))
+            ud = max(0, min(dw - 1, ud))
+            vd = max(0, min(dh - 1, vd))
+            z = self._depth_scalar_depth_frame(depth_m, ud, vd)
+            if z is None:
+                continue
+            x, y, z3 = self._backproj_cam_xyz(float(ud), float(vd), z, fx, fy, cx, cy)
+            cam_pts.append((x, y, z3))
+            u_rs.append(float(uu))
+            v_rs.append(float(vv))
+
+        min_l = int(self._target_point_mask_line_min_valid)
+        if len(cam_pts) < min_l:
+            return None
+        arr = np.asarray(cam_pts, dtype=np.float64)
+        u_m = float(np.median(u_rs))
+        v_m = float(np.median(v_rs))
+        xm, ym, zm = float(np.median(arr[:, 0])), float(np.median(arr[:, 1])), float(np.median(arr[:, 2]))
+        return u_m, v_m, xm, ym, zm
 
     def _project_to_map(self, pt_cam: PointStamped) -> PointStamped | None:
         if self._tf_buffer_3d is None or not self._target_frame:
@@ -810,23 +971,25 @@ class YoloObjectSegNode(Node):
         names = results[0].names if hasattr(results[0], "names") else {}
         order = np.argsort(-confs.astype(np.float32))
         max_n = max(1, int(self._max_targets_3d_per_frame))
+        iw = max(1, int(image_msg.width))
+        ih = max(1, int(image_msg.height))
+        r0 = results[0]
+        poly_src = getattr(getattr(r0, "masks", None), "xy", None)
+        poly_list: list[Any] | None = poly_src if poly_src is not None else None
         candidates: list[dict[str, Any]] = []
         for idx in order[:max_n]:
             i = int(idx)
             x1, y1, x2, y2 = [float(v) for v in xyxy[i]]
-            u_rgb = float(0.5 * (x1 + x2))
-            v_rgb = float(0.5 * (y1 + y2))
-            iw = max(1, int(image_msg.width))
-            ih = max(1, int(image_msg.height))
-            u_d = int(round(u_rgb * float(dw) / float(iw)))
-            v_d = int(round(v_rgb * float(dh) / float(ih)))
-            u_d = max(0, min(dw - 1, u_d))
-            v_d = max(0, min(dh - 1, v_d))
-            z = self._sample_depth_from_array(depth_m, u_d, v_d)
-            if z is None:
+            mask_rgb = None
+            if poly_list is not None and i < len(poly_list) and self._target_point_use_seg_mask_depth:
+                poly = np.asarray(poly_list[i], dtype=np.float64)
+                mask_rgb = self._rasterize_instance_mask_polygon(poly, iw, ih)
+            got = self._resolve_camera_xyz_with_mask(
+                depth_m, mask_rgb, x1, y1, x2, y2, iw, ih, dw, dh, fx, fy, cx, cy
+            )
+            if got is None:
                 continue
-            x = (float(u_d) - cx) * z / fx
-            y = (float(v_d) - cy) * z / fy
+            u_rgb, v_rgb, x, y, z = got
             cls_id = int(classes[i]) if len(classes) > i else -1
             if isinstance(names, dict):
                 label = str(names.get(cls_id, cls_id))

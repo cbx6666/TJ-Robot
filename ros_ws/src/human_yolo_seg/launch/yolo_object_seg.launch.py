@@ -31,7 +31,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "annotated_overlay_mode",
                 default_value="boxes",
-                description="annotated_image 叠图：boxes(快)/plot_no_masks/full(含分割蒙层最慢)",
+                description="annotated_image 叠图：boxes=仅框+标签(默认,3D用mask在节点内算不必画整图); plot_no_masks; full=整图mask最慢",
             ),
             DeclareLaunchArgument("publish_target_point_3d", default_value="true"),
             DeclareLaunchArgument("target_frame_id", default_value="map"),
@@ -67,6 +67,9 @@ def generate_launch_description():
                         "publish_target_point_3d": LaunchConfiguration("publish_target_point_3d"),
                         "target_frame_id": LaunchConfiguration("target_frame_id"),
                         "depth_unit_divisor": LaunchConfiguration("depth_unit_divisor"),
+                        "target_point_use_seg_mask_depth": True,
+                        "target_point_mask_line_samples": 21,
+                        "target_point_mask_line_min_valid": 3,
                         "enable_target_tracking": True,
                         "max_targets_3d_per_frame": 5,
                         "min_track_hits_for_publish": 2,

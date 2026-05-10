@@ -25,8 +25,12 @@ NAV_LAUNCH_PID=""
 cleanup() {
   local exit_code=$?
   if [[ -n "${NAV_LAUNCH_PID}" ]] && kill -0 "${NAV_LAUNCH_PID}" >/dev/null 2>&1; then
-    kill "${NAV_LAUNCH_PID}" >/dev/null 2>&1 || true
+    # 只 kill launch 父进程时，rviz2 / 各 nav2 子进程有时仍存活，终端会像「卡死」。
+    pkill -TERM -P "${NAV_LAUNCH_PID}" 2>/dev/null || true
+    sleep 0.4
+    kill -TERM "${NAV_LAUNCH_PID}" 2>/dev/null || true
     wait "${NAV_LAUNCH_PID}" 2>/dev/null || true
+    kill -KILL "${NAV_LAUNCH_PID}" 2>/dev/null || true
   fi
   bash "${PROJECT_ROOT}/scripts/tb3_stack.sh" stop >/dev/null 2>&1 || true
   exit "${exit_code}"
@@ -101,5 +105,7 @@ NAV_LAUNCH_PID=$!
 echo "[run_nav2] Nav2 launch PID=${NAV_LAUNCH_PID}"
 echo "[run_nav2] RViz: use '2D Pose Estimate' to initialize AMCL, then use the Nav2 goal tool to send a target."
 echo "[run_nav2] Logs: ${TB3_LOG_DIR}"
+echo "[run_nav2] 脚本会阻塞在此（wait Nav2）；结束请在本终端按 Ctrl+C，将清理 launch 子进程并 tb3_stack stop。"
+echo "[run_nav2] 若 Ctrl+C 无效：另开终端 kill ${NAV_LAUNCH_PID} 或 bash scripts/tb3_stack.sh stop"
 
 wait "${NAV_LAUNCH_PID}"

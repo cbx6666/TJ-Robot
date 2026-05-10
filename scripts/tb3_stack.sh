@@ -20,6 +20,11 @@ if [[ -f "${ROS_WS_SETUP}" ]]; then
   source "${ROS_WS_SETUP}"
 fi
 
+# common.sh 会打开 nounset；tb3_stack 大量用 ${VAR:-} 可选环境变量，保持关闭 -u。
+# shellcheck source=common.sh
+source "${SCRIPT_DIR}/common.sh"
+set +u
+
 TB3_STACK_MODE="${TB3_STACK_MODE:-assist}"
 TURTLEBOT3_MODEL="${TURTLEBOT3_MODEL:-waffle}"
 TB3_ASSIST_SCAN_FILTER="${TB3_ASSIST_SCAN_FILTER:-1}"
@@ -70,6 +75,8 @@ TB3_ENABLE_RSP="${TB3_ENABLE_RSP:-1}"
 mkdir -p "${TB3_LOG_DIR}"
 
 cleanup_old() {
+  # Nav2（navigation / tj_static_map_nav2）；与 scripts/kill_nav2.sh、common.sh 一致
+  tj_kill_nav2_background_launch
   pkill -9 gzserver 2>/dev/null || true
   pkill -9 gzclient 2>/dev/null || true
   pkill -9 -x rviz2 2>/dev/null || true
@@ -608,7 +615,7 @@ usage() {
   cat <<'EOF'
 Usage:
   bash scripts/tb3_stack.sh start
-  bash scripts/tb3_stack.sh stop
+  bash scripts/tb3_stack.sh stop   (含 Nav2: navigation / tj_static_map_nav2 launch)
   bash scripts/tb3_stack.sh check
   bash scripts/tb3_stack.sh logs [all|gzserver|gzclient|rviz|rsp|yolo|rgbd]
 
