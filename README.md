@@ -32,8 +32,17 @@ docs/                  架构与实验文档
 bash scripts/build.sh
 bash scripts/run_simulation.sh         # 默认 RGBD 机器人（waffle + assist）
 bash scripts/run_mapping.sh            # 仅激光 + SLAM + RViz（建图常用）
+bash scripts/run_nav2.sh               # 静态地图 Nav2 + 自动巡视
 bash scripts/run_full_system.sh        # 语音/LLM/任务/mock抓放全链路
 ```
+
+Nav2 巡视入口已统一到 `scripts/run_nav2.sh`：脚本会启动 Gazebo 底盘、Nav2、单个 RViz，并默认运行 `robot_navigation/scripts/patrol_waypoints.py` 巡视当前地图。定位链路会先于导航链路启动，AMCL 默认使用仿真起点 `(0, 0, 0)`。手动点目标时可用：
+
+```bash
+TB3_AUTO_PATROL=0 bash scripts/run_nav2.sh
+```
+
+运行中的导航用 `Ctrl+C` 停止；若有 Gazebo/RViz 残留，再执行 `bash scripts/tb3_stack.sh stop`。
 
 建图模式是否开启 Gazebo 界面（`gzclient`）：
 

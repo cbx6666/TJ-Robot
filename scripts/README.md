@@ -31,7 +31,8 @@
 - `run_mapping.sh`
   - 启动建图链路
 - `run_nav2.sh`
-  - 启动基于静态地图的 Nav2 导航链路
+  - 统一启动基于静态地图的 Nav2 导航链路
+  - 默认启动 Gazebo 底盘、Nav2、单个 RViz 和自动巡视节点
 - `run_voice_demo.sh`
   - 启动语音交互演示链路
 - `run_search_task.sh`
@@ -66,6 +67,18 @@ bash scripts/run_mapping.sh
 ```bash
 bash scripts/run_nav2.sh
 ```
+
+常用开关：
+
+```bash
+PLANNER_TYPE=dijkstra bash scripts/run_nav2.sh  # 切换 Dijkstra
+TB3_AUTO_PATROL=0 bash scripts/run_nav2.sh      # 只开 Nav2，手动点目标
+TB3_ENABLE_RVIZ=0 bash scripts/run_nav2.sh      # 后台自动巡视，不开 RViz
+```
+
+`run_nav2.sh` 中 RViz 只由 Nav2 launch 启动；底盘栈里的 RViz 会被关闭，避免双 RViz。
+Nav2 launch 会先启动 `map_server + AMCL`，再延迟启动 planner/controller，避免导航节点在 `map -> odom` 还没建立时卡住。
+运行中的导航优先用 `Ctrl+C` 停止；异常残留时再执行 `bash scripts/tb3_stack.sh stop`。
 
 ### 3.5 停止仿真栈
 

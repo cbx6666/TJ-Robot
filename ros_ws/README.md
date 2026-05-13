@@ -48,7 +48,7 @@ colcon build --packages-select robot_bringup robot_navigation
 
 - `scripts/run_simulation.sh`：默认仿真入口
 - `scripts/run_mapping.sh`：建图入口
-- `scripts/run_nav2.sh`：导航入口
+- `scripts/run_nav2.sh`：Nav2 与自动巡视统一入口
 
 ## 5. 维护注意事项
 
