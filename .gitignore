@@ -24,3 +24,5 @@ data/recordings/*
 !data/results/.gitkeep
 !data/datasets/.gitkeep
 !data/recordings/.gitkeep
+
+.vscode/
