@@ -7,6 +7,7 @@ from typing import Any
 
 import rclpy
 from action_msgs.msg import GoalStatus
+from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
 from rclpy.action.client import ClientGoalHandle

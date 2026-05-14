@@ -100,6 +100,10 @@ cleanup_old() {
 wait_for_service() {
   local name="$1"
   local timeout_s="${2:-20}"
+  # 避免 TB3_GZSERVER_WAIT_SEC=0 等导致零次循环、立刻误判失败
+  if [[ "${timeout_s}" =~ ^[0-9]+$ ]] && (( timeout_s < 5 )); then
+    timeout_s=5
+  fi
   local deadline=$((SECONDS + timeout_s))
   while (( SECONDS < deadline )); do
     if ros2 service type "${name}" >/dev/null 2>&1; then
@@ -381,8 +385,19 @@ do_start() {
   step_t0=$SECONDS
   step_begin "3" "8" "Spawn robot model"
   local wait_spawn_t0=$SECONDS
-  if ! wait_for_service "/spawn_entity" "${TB3_GZSERVER_WAIT_SEC:-45}"; then
-    echo "ERROR: gzserver 未暴露 /spawn_entity" >&2
+  local _gz_wait="${TB3_GZSERVER_WAIT_SEC:-45}"
+  [[ "${_gz_wait}" =~ ^[0-9]+$ ]] || _gz_wait=45
+  ((_gz_wait < 15)) && _gz_wait=15
+  if ! wait_for_service "/spawn_entity" "${_gz_wait}"; then
+    echo "ERROR: gzserver 未在 ${_gz_wait}s 内暴露 ROS 2 服务 /spawn_entity。" >&2
+    echo "  常见原因: (1) gzserver 仍在加载世界或已崩溃 (2) WSL/机械盘过慢 (3) 残留 gzserver 占坑。" >&2
+    echo "  建议: 查看 tail -50 \"${TB3_LOG_DIR}/gzserver.log\"；尝试 bash scripts/tb3_stack.sh stop 后重试；" >&2
+    echo "  或加大等待: export TB3_GZSERVER_WAIT_SEC=120" >&2
+    if [[ -f "${TB3_LOG_DIR}/gzserver.log" ]]; then
+      echo "----- gzserver.log (last 24 lines) -----" >&2
+      tail -n 24 "${TB3_LOG_DIR}/gzserver.log" >&2 || true
+      echo "----------------------------------------" >&2
+    fi
     exit 1
   fi
   echo "  -> /spawn_entity ready | wait=$(format_duration "$((SECONDS - wait_spawn_t0))")"
@@ -457,12 +472,43 @@ do_start() {
     fi
   fi
   echo "  -> model preprocess done | took=$(format_duration "$((SECONDS - model_prep_t0))")"
+  # spawn_entity.py 内部会再次等待 /spawn_entity（默认 30s）。预处理较重时，偶发「bash 侧已看到服务、
+  # 到本进程启动时服务又未就绪」或 DDS 发现滞后；先小睡并二次确认，再带重试执行 spawn。
+  sleep 2
+  if ! wait_for_service "/spawn_entity" 45; then
+    echo "ERROR: 预处理结束后 /spawn_entity 仍不可用，请查看 ${TB3_LOG_DIR}/gzserver.log" >&2
+    exit 1
+  fi
   local spawn_t0=$SECONDS
-  ros2 run gazebo_ros spawn_entity.py \
-    -entity "${TURTLEBOT3_MODEL}" \
-    -file "${spawn_model_file}" \
-    -x "${ROBOT_START_X}" -y "${ROBOT_START_Y}" -z "${ROBOT_START_Z}" -Y "${ROBOT_START_YAW}" \
-    >"${TB3_LOG_DIR}/spawn_entity.log" 2>&1
+  local spawn_attempt=1
+  local spawn_max=3
+  while (( spawn_attempt <= spawn_max )); do
+    if ros2 run gazebo_ros spawn_entity.py \
+      -timeout 90.0 \
+      -entity "${TURTLEBOT3_MODEL}" \
+      -file "${spawn_model_file}" \
+      -x "${ROBOT_START_X}" -y "${ROBOT_START_Y}" -z "${ROBOT_START_Z}" -Y "${ROBOT_START_YAW}" \
+      >"${TB3_LOG_DIR}/spawn_entity.log" 2>&1
+    then
+      break
+    fi
+    if (( spawn_attempt < spawn_max )); then
+      echo "WARNING: spawn_entity 第 ${spawn_attempt}/${spawn_max} 次失败，3s 后重试（见 ${TB3_LOG_DIR}/spawn_entity.log）" >&2
+      sleep 3
+      wait_for_service "/spawn_entity" 30 || true
+    else
+      echo "ERROR: gazebo_ros spawn_entity.py 失败（已重试 ${spawn_max} 次）。常见: gzserver 异常、实体名冲突、WSL/DDS 滞后。" >&2
+      echo "  完整日志: ${TB3_LOG_DIR}/spawn_entity.log" >&2
+      if [[ -f "${TB3_LOG_DIR}/spawn_entity.log" ]]; then
+        echo "----- spawn_entity.log (last 40 lines) -----" >&2
+        tail -n 40 "${TB3_LOG_DIR}/spawn_entity.log" >&2 || true
+        echo "--------------------------------------------" >&2
+      fi
+      echo "  建议: bash scripts/tb3_stack.sh stop；可试 ros2 daemon stop 后再启动。" >&2
+      exit 1
+    fi
+    spawn_attempt=$((spawn_attempt + 1))
+  done
   echo "  -> spawn_entity done | took=$(format_duration "$((SECONDS - spawn_t0))")"
   step_end "robot model spawned" "${step_t0}" "${stack_t0}"
 

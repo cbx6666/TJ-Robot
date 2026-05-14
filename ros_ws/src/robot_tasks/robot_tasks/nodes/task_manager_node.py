@@ -146,7 +146,7 @@ class TaskManagerNode(Node):
         for en, zh in en_to_zh.items():
             if en in low:
                 return zh
-        objects = ["杯子", "瓶子", "遥控器", "纸巾", "书", "手机"]
+        objects = ["椅子", "杯子", "瓶子", "遥控器", "纸巾", "书", "手机"]
         for obj in objects:
             if obj in text:
                 return obj

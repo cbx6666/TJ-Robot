@@ -29,6 +29,8 @@ export TB3_CAMERA_UPDATE_RATE="${TB3_CAMERA_UPDATE_RATE:-8}"
 # 与 run_simulation.sh 对齐：避免 Gazebo 传感器在无订阅路径上抖停
 export TB3_CAMERA_ALWAYS_ON="${TB3_CAMERA_ALWAYS_ON:-1}"
 export TB3_LOG_DIR="${TB3_LOG_DIR:-${PROJECT_ROOT}/data/logs/full_system}"
+# RViz 使用 tb3_stack 默认 test1.rviz（含 YOLO/地图/激光等）；已在 test1.rviz 中合并 Nav2 GoalTool + Navigation 2 面板。
+
 MAP_FILE="${MAP_FILE:-${ROS_WS}/src/robot_bringup/maps/map.yaml}"
 PARAMS_FILE="${PARAMS_FILE:-${ROS_WS}/src/robot_navigation/config/nav2_params.yaml}"
 NAV_LAUNCH_FILE="${ROS_WS}/src/robot_navigation/launch/navigation.launch.py"
@@ -52,9 +54,7 @@ echo "Full system: 仿真栈（与 run_simulation 同参）+ Nav2（defer 启动
 echo "纯激光建图/日常导航请用: bash scripts/run_mapping.sh（不经由本脚本）。"
 echo "Starting RGBD simulation + YOLO recognition stack first (static-map mode)."
 bash "${PROJECT_ROOT}/scripts/tb3_stack.sh" start
-
-echo "Stopping duplicate Nav2 from previous runs (if any) ..."
-tj_kill_nav2_background_launch
+# tb3_stack start 内已 cleanup_old（含旧 Nav2），此处不再重复杀进程，避免日志噪音。
 
 echo "Starting Nav2 with static map: ${MAP_FILE} -> ${NAV2_MAP_FILE} (ASCII workdir avoids launch path mangling)"
 ROS_SETUP_BASH="${ROS_SETUP_BASH:-/opt/ros/humble/setup.bash}"
@@ -84,7 +84,13 @@ echo "Nav2 started in background (PID=$!). Logs: ${TB3_LOG_DIR}/nav2.launch.log"
 ) >>"${TB3_LOG_DIR}/nav2_deferred_navigation.log" 2>&1 &
 echo "Deferred navigation lifecycle STARTUP helper started (log: ${TB3_LOG_DIR}/nav2_deferred_navigation.log)"
 
-# LLM：export TJ_LLM_API_KEY；可选 export TJ_LLM_API_URL（如 https://api.openai.com/v1），launch 传 llm_api_url:=...
-echo "Voice/LLM: 默认 mock 语音；可选 pip install faster-whisper 后 asr_backend:=whisper_file；LLM 见 TJ_LLM_* 环境变量。"
+# 语音：task_pipeline 默认 asr_backend=mock 且 enable_mock_voice=false 时不会产生任何识别。
+# 此处默认注入 whisper_mic（需 pip install -r robot_interaction/requirements-voice.txt 及 PortAudio）。
+# 覆盖方式：export TJ_FULL_SYSTEM_ASR=mock 且启动时传 enable_mock_voice:=true；或显式传 asr_backend:=whisper_file。
+echo "Voice/LLM: RViz 使用 test1.rviz（YOLO + Nav2 目标工具）；ASR 默认 \${TJ_FULL_SYSTEM_ASR:-whisper_mic}；LLM 见 TJ_LLM_*。"
 echo "Starting voice/LLM/task/manipulation pipeline. Press Ctrl-C here, then run scripts/tb3_stack.sh stop to stop Gazebo."
-exec ros2 launch robot_bringup task_pipeline.launch.py "$@"
+_extra_launch=()
+if [[ "${*:-}" != *asr_backend* ]]; then
+  _extra_launch+=("asr_backend:=${TJ_FULL_SYSTEM_ASR:-whisper_mic}")
+fi
+exec ros2 launch robot_bringup task_pipeline.launch.py "${_extra_launch[@]}" "$@"

@@ -78,6 +78,11 @@ python3 scripts/prep_faster_whisper.py --hf-endpoint https://hf-mirror.com --siz
 
 在项目根目录执行；更多说明见 `scripts/prep_faster_whisper.py` 顶部文档字符串。
 
+### 全链路 `scripts/run_full_system.sh` 约定
+
+- **RViz**：与仿真栈共用 `ros_ws/src/robot_bringup/config/test1.rviz`（含 YOLO 图像/目标点/Marker 等），并在其中合并 **Nav2 的 `GoalTool`（2D Nav Goal）** 与 **「Navigation 2」** 侧栏，便于发 `NavigateToPose`，无需再切换到 `nav2_default_view.rviz`。
+- **语音识别**：若启动参数里未写 `asr_backend:=...`，脚本会注入 `asr_backend:=${TJ_FULL_SYSTEM_ASR:-whisper_mic}`（默认麦克风）。无麦克风或不想装依赖时，可 `export TJ_FULL_SYSTEM_ASR=mock` 并传入 `enable_mock_voice:=true`，或自行传 `asr_backend:=whisper_file`。
+
 ---
 
 ## 下一步
