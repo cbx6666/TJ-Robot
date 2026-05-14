@@ -20,6 +20,11 @@ if [[ -f "${ROS_WS_SETUP}" ]]; then
   source "${ROS_WS_SETUP}"
 fi
 
+# common.sh 会打开 nounset；tb3_stack 大量用 ${VAR:-} 可选环境变量，保持关闭 -u。
+# shellcheck source=common.sh
+source "${SCRIPT_DIR}/common.sh"
+set +u
+
 TB3_STACK_MODE="${TB3_STACK_MODE:-assist}"
 TURTLEBOT3_MODEL="${TURTLEBOT3_MODEL:-waffle}"
 TB3_ASSIST_SCAN_FILTER="${TB3_ASSIST_SCAN_FILTER:-1}"
@@ -54,8 +59,12 @@ RVIZ_CONFIG_FILE="${RVIZ_CONFIG_FILE:-${SCRIPT_DIR}/../ros_ws/src/robot_bringup/
 YOLO_IMAGE_TOPIC="${YOLO_IMAGE_TOPIC:-/camera/image_raw}"
 YOLO_CAMERA_INFO_TOPIC="${YOLO_CAMERA_INFO_TOPIC:-/camera/camera_info}"
 YOLO_DEVICE="${YOLO_DEVICE:-auto}"
+# COCO 类别 ID 逗号分隔；56=chair、0=person；all 表示不限制类别（计算更重）
+YOLO_TARGET_CLASS_IDS="${YOLO_TARGET_CLASS_IDS:-0,56}"
 RGBD_DEPTH_IMAGE_TOPIC="${RGBD_DEPTH_IMAGE_TOPIC:-/tb3_depth_only/depth/image_raw}"
 RGBD_DEPTH_CAMERA_INFO_TOPIC="${RGBD_DEPTH_CAMERA_INFO_TOPIC:-/tb3_depth_only/depth/camera_info}"
+YOLO_DEPTH_TOPIC="${YOLO_DEPTH_TOPIC:-${RGBD_DEPTH_IMAGE_TOPIC}}"
+YOLO_DEPTH_CAMERA_INFO_TOPIC="${YOLO_DEPTH_CAMERA_INFO_TOPIC:-${RGBD_DEPTH_CAMERA_INFO_TOPIC}}"
 TB3_SLAM_PARAMS_FILE="${TB3_SLAM_PARAMS_FILE:-}"
 ROBOT_START_X="${ROBOT_START_X:-0.0}"
 ROBOT_START_Y="${ROBOT_START_Y:-0.0}"
@@ -66,14 +75,20 @@ TB3_ENABLE_RSP="${TB3_ENABLE_RSP:-1}"
 mkdir -p "${TB3_LOG_DIR}"
 
 cleanup_old() {
+  # Nav2（navigation / tj_static_map_nav2）；与 scripts/kill_nav2.sh、common.sh 一致
+  tj_kill_nav2_background_launch
   pkill -9 gzserver 2>/dev/null || true
   pkill -9 gzclient 2>/dev/null || true
   pkill -9 -x rviz2 2>/dev/null || true
+  pkill -9 -f "ros2 launch human_yolo_seg yolo_object_seg.launch.py" 2>/dev/null || true
   pkill -9 -f "ros2 launch human_yolo_seg yolo_person_seg.launch.py" 2>/dev/null || true
   pkill -9 -f "ros2 launch robot_bringup rgbd_to_scan.launch.py" 2>/dev/null || true
   pkill -9 -f "ros2 launch robot_bringup slam_laser.launch.py" 2>/dev/null || true
   pkill -9 -f robot_state_publisher 2>/dev/null || true
+  pkill -9 -f publish_robot_description_topic.py 2>/dev/null || true
   pkill -9 -f '/robot_description std_msgs/msg/String' 2>/dev/null || true
+  pkill -9 -f yolo_detector_node 2>/dev/null || true
+  pkill -9 -f yolo_object_seg_node 2>/dev/null || true
   pkill -9 -f yolo_person_seg_node 2>/dev/null || true
   pkill -9 -f async_slam_toolbox_node 2>/dev/null || true
   pkill -9 -f slam_toolbox 2>/dev/null || true
@@ -85,6 +100,10 @@ cleanup_old() {
 wait_for_service() {
   local name="$1"
   local timeout_s="${2:-20}"
+  # 避免 TB3_GZSERVER_WAIT_SEC=0 等导致零次循环、立刻误判失败
+  if [[ "${timeout_s}" =~ ^[0-9]+$ ]] && (( timeout_s < 5 )); then
+    timeout_s=5
+  fi
   local deadline=$((SECONDS + timeout_s))
   while (( SECONDS < deadline )); do
     if ros2 service type "${name}" >/dev/null 2>&1; then
@@ -148,22 +167,85 @@ wait_topic_with_timing() {
 
 publish_robot_description() {
   local urdf_file="$1"
-  local payload
-  payload="$(python3 -c 'import json,sys; print("{data: " + json.dumps(open(sys.argv[1], encoding="utf-8").read()) + "}")' "${urdf_file}")"
-  setsid ros2 topic pub -r 1 --qos-durability transient_local /robot_description std_msgs/msg/String "${payload}" \
+  local pub_py="${SCRIPT_DIR}/../ros_ws/src/robot_bringup/scripts/publish_robot_description_topic.py"
+  if [[ ! -f "${pub_py}" ]]; then
+    echo "ERROR: 未找到 ${pub_py}" >&2
+    exit 1
+  fi
+  setsid python3 "${pub_py}" "${urdf_file}" --hz "${TB3_ROBOT_DESCRIPTION_TOPIC_HZ:-2}" \
     >"${TB3_LOG_DIR}/robot_description.log" 2>&1 < /dev/null &
 }
 
 expand_robot_urdf() {
   local input_file="$1"
   local output_file="$2"
-  if [[ -f "${output_file}" && "${output_file}" -nt "${input_file}" ]]; then
-    return 0
+  local frag="${SCRIPT_DIR}/../ros_ws/src/robot_bringup/urdf/waffle_depth_camera_links.urdf.xml"
+  local xraw="${TB3_LOG_DIR}/turtlebot3_${TURTLEBOT3_MODEL}_xacro_raw.urdf"
+  local need_depth_links=0
+  if [[ "${TURTLEBOT3_MODEL}" == "waffle" || "${TURTLEBOT3_MODEL}" == "waffle_pi" ]]; then
+    need_depth_links=1
   fi
-  if ! ros2 run xacro xacro "${input_file}" >"${output_file}" 2>"${TB3_LOG_DIR}/xacro_tb3.log"; then
+  if [[ -f "${output_file}" && "${output_file}" -nt "${input_file}" ]]; then
+    if [[ "${need_depth_links}" != "1" || ! -f "${frag}" ]]; then
+      return 0
+    fi
+    if [[ "${output_file}" -nt "${frag}" ]]; then
+      return 0
+    fi
+  fi
+  if ! ros2 run xacro xacro "${input_file}" >"${xraw}" 2>"${TB3_LOG_DIR}/xacro_tb3.log"; then
     echo "ERROR: xacro 展开失败: ${input_file}" >&2
     echo "       详情见: ${TB3_LOG_DIR}/xacro_tb3.log" >&2
     return 1
+  fi
+  if [[ "${need_depth_links}" == "1" && -f "${frag}" ]]; then
+    if ! python3 - "${xraw}" "${frag}" "${output_file}" <<'PYAPPEND'
+import re
+import sys
+from pathlib import Path
+
+xacro_out = Path(sys.argv[1])
+frag_path = Path(sys.argv[2])
+out_path = Path(sys.argv[3])
+base = xacro_out.read_text(encoding="utf-8")
+tok = "</robot>"
+if tok not in base:
+    print("ERROR: xacro URDF 缺少 </robot>", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def _already_has_camera_depth_mount(urdf: str) -> bool:
+    # Humble turtlebot3_description/waffle 常为 RealSense 树，已包含 camera_depth_*。
+    # 旧版正则在部分 joint 排版下会漏检，导致与 fragment 二次拼装、link 重名。
+    if re.search(r'<link\s+name\s*=\s*"camera_depth_frame"', urdf):
+        return True
+    if re.search(r"<link\s+name\s*=\s*'camera_depth_frame'", urdf):
+        return True
+    return False
+
+
+frag = frag_path.read_text(encoding="utf-8").strip()
+if _already_has_camera_depth_mount(base):
+    print(
+        "NOTE: URDF already has camera_depth_frame; skipping waffle_depth_camera_links fragment",
+        file=sys.stderr,
+    )
+    frag = ""
+
+if frag:
+    head, _sep, _tail = base.rpartition(tok)
+    merged = head.rstrip() + "\n" + frag + "\n" + tok + "\n"
+else:
+    merged = base
+
+out_path.write_text(merged, encoding="utf-8")
+PYAPPEND
+    then
+      echo "ERROR: 拼接 depth_camera_links URDF 失败" >&2
+      return 1
+    fi
+  else
+    cp -f "${xraw}" "${output_file}"
   fi
 }
 
@@ -303,8 +385,19 @@ do_start() {
   step_t0=$SECONDS
   step_begin "3" "8" "Spawn robot model"
   local wait_spawn_t0=$SECONDS
-  if ! wait_for_service "/spawn_entity" "${TB3_GZSERVER_WAIT_SEC:-45}"; then
-    echo "ERROR: gzserver 未暴露 /spawn_entity" >&2
+  local _gz_wait="${TB3_GZSERVER_WAIT_SEC:-45}"
+  [[ "${_gz_wait}" =~ ^[0-9]+$ ]] || _gz_wait=45
+  ((_gz_wait < 15)) && _gz_wait=15
+  if ! wait_for_service "/spawn_entity" "${_gz_wait}"; then
+    echo "ERROR: gzserver 未在 ${_gz_wait}s 内暴露 ROS 2 服务 /spawn_entity。" >&2
+    echo "  常见原因: (1) gzserver 仍在加载世界或已崩溃 (2) WSL/机械盘过慢 (3) 残留 gzserver 占坑。" >&2
+    echo "  建议: 查看 tail -50 \"${TB3_LOG_DIR}/gzserver.log\"；尝试 bash scripts/tb3_stack.sh stop 后重试；" >&2
+    echo "  或加大等待: export TB3_GZSERVER_WAIT_SEC=120" >&2
+    if [[ -f "${TB3_LOG_DIR}/gzserver.log" ]]; then
+      echo "----- gzserver.log (last 24 lines) -----" >&2
+      tail -n 24 "${TB3_LOG_DIR}/gzserver.log" >&2 || true
+      echo "----------------------------------------" >&2
+    fi
     exit 1
   fi
   echo "  -> /spawn_entity ready | wait=$(format_duration "$((SECONDS - wait_spawn_t0))")"
@@ -338,13 +431,84 @@ do_start() {
     fi
     echo "Using camera mode: enable=${TB3_ENABLE_CAMERA}, always_on=${TB3_CAMERA_ALWAYS_ON}, update_rate=${TB3_CAMERA_UPDATE_RATE} Hz (${spawn_model_file})"
   fi
+  # 官方 turtlebot3_waffle SDF 仅有 RGB camera，不会发布 rgbd/YOLO 默认期望的 tb3_depth_only 深度话题。
+  if [[ "${TB3_ENABLE_CAMERA}" == "1" ]] &&
+    { [[ "${TURTLEBOT3_MODEL}" == "waffle" ]] || [[ "${TURTLEBOT3_MODEL}" == "waffle_pi" ]]; }; then
+    local assist_py="${SCRIPT_DIR}/../ros_ws/src/robot_bringup/scripts/prepare_assist_waffle_sdf.py"
+    if [[ -f "${assist_py}" ]]; then
+      local depth_spawn_sdf="${TB3_LOG_DIR}/turtlebot3_${TURTLEBOT3_MODEL}_spawn_with_depth.sdf"
+      if python3 "${assist_py}" "${spawn_model_file}" "${depth_spawn_sdf}" \
+        >"${TB3_LOG_DIR}/assist_waffle_depth_sdf.log" 2>&1; then
+        spawn_model_file="${depth_spawn_sdf}"
+        echo "  -> injected Gazebo tb3_depth_only depth sensor -> $(basename "${depth_spawn_sdf}")"
+      else
+        echo "WARNING: prepare_assist_waffle_sdf failed; /tb3_depth_only may be missing (see ${TB3_LOG_DIR}/assist_waffle_depth_sdf.log)" >&2
+      fi
+    else
+      echo "WARNING: missing ${assist_py}; cannot inject Gazebo depth sensor" >&2
+    fi
+  fi
+  # 官方 waffle 相机碰撞盒常与 LDS 扫掠高度重叠 → 正前方扇形盲区；测距默认 0.01m 高斯噪声会带来“抖动”观感。
+  if [[ "${TB3_PATCH_SPAWN_SDF_EXTRAS:-1}" == "1" ]] && [[ -f "${spawn_model_file}" ]]; then
+    local patch_py="${SCRIPT_DIR}/../ros_ws/src/robot_bringup/scripts/patch_tb3_spawn_sdf_assist.py"
+    if [[ -f "${patch_py}" ]]; then
+      local _lstd="${TB3_SIM_LASER_RANGE_STDDEV:-0}"
+      local _strip="${TB3_STRIP_CAMERA_RGB_COLLISION:-1}"
+      if [[ "${_strip}" == "1" ]]; then
+        if python3 "${patch_py}" "${spawn_model_file}" --laser-noise-stddev "${_lstd}" --strip-camera-rgb-collisions \
+          >"${TB3_LOG_DIR}/patch_spawn_sdf_assist.log" 2>&1; then
+          echo "  -> patched spawn SDF (strip camera_rgb collisions, laser range noise stddev=${_lstd})"
+        else
+          echo "WARNING: patch_tb3_spawn_sdf_assist failed (see ${TB3_LOG_DIR}/patch_spawn_sdf_assist.log)" >&2
+        fi
+      else
+        if python3 "${patch_py}" "${spawn_model_file}" --laser-noise-stddev "${_lstd}" \
+          >"${TB3_LOG_DIR}/patch_spawn_sdf_assist.log" 2>&1; then
+          echo "  -> patched spawn SDF (laser range noise stddev=${_lstd})"
+        else
+          echo "WARNING: patch_tb3_spawn_sdf_assist failed (see ${TB3_LOG_DIR}/patch_spawn_sdf_assist.log)" >&2
+        fi
+      fi
+    fi
+  fi
   echo "  -> model preprocess done | took=$(format_duration "$((SECONDS - model_prep_t0))")"
+  # spawn_entity.py 内部会再次等待 /spawn_entity（默认 30s）。预处理较重时，偶发「bash 侧已看到服务、
+  # 到本进程启动时服务又未就绪」或 DDS 发现滞后；先小睡并二次确认，再带重试执行 spawn。
+  sleep 2
+  if ! wait_for_service "/spawn_entity" 45; then
+    echo "ERROR: 预处理结束后 /spawn_entity 仍不可用，请查看 ${TB3_LOG_DIR}/gzserver.log" >&2
+    exit 1
+  fi
   local spawn_t0=$SECONDS
-  ros2 run gazebo_ros spawn_entity.py \
-    -entity "${TURTLEBOT3_MODEL}" \
-    -file "${spawn_model_file}" \
-    -x "${ROBOT_START_X}" -y "${ROBOT_START_Y}" -z "${ROBOT_START_Z}" -Y "${ROBOT_START_YAW}" \
-    >"${TB3_LOG_DIR}/spawn_entity.log" 2>&1
+  local spawn_attempt=1
+  local spawn_max=3
+  while (( spawn_attempt <= spawn_max )); do
+    if ros2 run gazebo_ros spawn_entity.py \
+      -timeout 90.0 \
+      -entity "${TURTLEBOT3_MODEL}" \
+      -file "${spawn_model_file}" \
+      -x "${ROBOT_START_X}" -y "${ROBOT_START_Y}" -z "${ROBOT_START_Z}" -Y "${ROBOT_START_YAW}" \
+      >"${TB3_LOG_DIR}/spawn_entity.log" 2>&1
+    then
+      break
+    fi
+    if (( spawn_attempt < spawn_max )); then
+      echo "WARNING: spawn_entity 第 ${spawn_attempt}/${spawn_max} 次失败，3s 后重试（见 ${TB3_LOG_DIR}/spawn_entity.log）" >&2
+      sleep 3
+      wait_for_service "/spawn_entity" 30 || true
+    else
+      echo "ERROR: gazebo_ros spawn_entity.py 失败（已重试 ${spawn_max} 次）。常见: gzserver 异常、实体名冲突、WSL/DDS 滞后。" >&2
+      echo "  完整日志: ${TB3_LOG_DIR}/spawn_entity.log" >&2
+      if [[ -f "${TB3_LOG_DIR}/spawn_entity.log" ]]; then
+        echo "----- spawn_entity.log (last 40 lines) -----" >&2
+        tail -n 40 "${TB3_LOG_DIR}/spawn_entity.log" >&2 || true
+        echo "--------------------------------------------" >&2
+      fi
+      echo "  建议: bash scripts/tb3_stack.sh stop；可试 ros2 daemon stop 后再启动。" >&2
+      exit 1
+    fi
+    spawn_attempt=$((spawn_attempt + 1))
+  done
   echo "  -> spawn_entity done | took=$(format_duration "$((SECONDS - spawn_t0))")"
   step_end "robot model spawned" "${step_t0}" "${stack_t0}"
 
@@ -353,12 +517,15 @@ do_start() {
   local yolo_enabled=0
   if [[ "${TB3_ASSIST_SCAN_FILTER}" == "1" && "${TB3_ENABLE_CAMERA}" == "1" ]]; then
     yolo_enabled=1
-    setsid ros2 launch human_yolo_seg yolo_person_seg.launch.py \
+    setsid ros2 launch human_yolo_seg yolo_object_seg.launch.py \
       use_sim_time:=true \
       image_topic:="${YOLO_IMAGE_TOPIC}" \
       camera_info_topic:="${YOLO_CAMERA_INFO_TOPIC}" \
+      depth_topic:="${YOLO_DEPTH_TOPIC}" \
+      depth_camera_info_topic:="${YOLO_DEPTH_CAMERA_INFO_TOPIC}" \
       device:="${YOLO_DEVICE}" \
-      >"${TB3_LOG_DIR}/yolo_person_seg.log" 2>&1 < /dev/null &
+      target_class_ids_csv:="${YOLO_TARGET_CLASS_IDS}" \
+      >"${TB3_LOG_DIR}/yolo_object_seg.log" 2>&1 < /dev/null &
   else
     if [[ "${TB3_ASSIST_SCAN_FILTER}" != "1" ]]; then
       echo "Skip YOLO detection (TB3_ASSIST_SCAN_FILTER=0)"
@@ -442,7 +609,7 @@ do_start() {
     wait_topic_with_timing "/map" 20 "${stack_t0}" || true
   fi
   if [[ "${yolo_enabled}" == "1" ]]; then
-    wait_topic_with_timing "/human_yolo/annotated_image" 20 "${stack_t0}" || true
+    wait_topic_with_timing "/yolo_objects/annotated_image" 20 "${stack_t0}" || true
   fi
   step_end "warm-up checks done" "${step_t0}" "${stack_t0}"
   echo "Total startup time: $(format_duration "$((SECONDS - stack_t0))")"
@@ -456,7 +623,7 @@ do_stop() {
 
 do_check() {
   local status=0
-  local topics=(/clock /scan /odom /tf /tf_static /human_yolo/annotated_image)
+  local topics=(/clock /scan /odom /tf /tf_static /yolo_objects/annotated_image)
   if [[ "${TB3_ENABLE_SLAM:-1}" == "1" ]]; then
     topics+=(/map)
   fi
@@ -483,7 +650,7 @@ do_logs() {
     gzclient) tail -f "${TB3_LOG_DIR}/gzclient.log" ;;
     rviz|rviz2) tail -f "${TB3_LOG_DIR}/rviz2.log" ;;
     rsp|robot_state_publisher) tail -f "${TB3_LOG_DIR}/robot_state_publisher.log" ;;
-    yolo|yolo_person) tail -f "${TB3_LOG_DIR}/yolo_person_seg.log" ;;
+    yolo|yolo_object|yolo_person) tail -f "${TB3_LOG_DIR}/yolo_object_seg.log" ;;
     rgbd|rgbd_to_scan|depth) tail -f "${TB3_LOG_DIR}/rgbd_to_scan.log" ;;
     all) ls -1 "${TB3_LOG_DIR}" ;;
     *) echo "Unknown log target: ${target}"; exit 1 ;;
@@ -494,7 +661,7 @@ usage() {
   cat <<'EOF'
 Usage:
   bash scripts/tb3_stack.sh start
-  bash scripts/tb3_stack.sh stop
+  bash scripts/tb3_stack.sh stop   (含 Nav2: navigation / tj_static_map_nav2 launch)
   bash scripts/tb3_stack.sh check
   bash scripts/tb3_stack.sh logs [all|gzserver|gzclient|rviz|rsp|yolo|rgbd]
 
@@ -502,6 +669,10 @@ Common GUI env switches:
   TB3_ENABLE_GZCLIENT=0/1   (disable/enable Gazebo client window)
   TB3_ENABLE_RVIZ=0/1       (disable/enable RViz window)
   TB3_NO_GUI=1              (legacy switch, disable both)
+  TB3_PATCH_SPAWN_SDF_EXTRAS=1 Patch spawn SDF: strip RGB link collisions / laser noise (defaults below).
+  TB3_STRIP_CAMERA_RGB_COLLISION=1  Remove camera_rgb_frame collisions (reduces LDS self-occlusion in sim).
+  TB3_SIM_LASER_RANGE_STDDEV=0     Gazebo ray range Gaussian stddev for hls_lfcd_lds (meters).
+  TB3_ROBOT_DESCRIPTION_TOPIC_HZ=2 Rate for publishing /robot_description (std_msgs/String) for RViz.
 
 This simplified stack keeps only:
 - RGBD robot simulation

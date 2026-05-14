@@ -1,7 +1,14 @@
-# colcon outputs
+# colcon outputs（含工作区 ros_ws 下标准三目录；顶层若存在同名目录一并忽略）
 build/
 install/
 log/
+ros_ws/build/
+ros_ws/install/
+ros_ws/log/
+
+# Python 虚拟环境（建议在仓库外或本目录名下自建 venv）
+.venv/
+venv/
 
 # Python
 __pycache__/
@@ -14,6 +21,9 @@ __pycache__/
 # Temporary/local SDF
 model_in.sdf
 /ros_ws/src/robot_bringup/models
+
+# Local LLM / API keys (never commit)
+local_llm.env
 
 # System outputs
 data/logs/*

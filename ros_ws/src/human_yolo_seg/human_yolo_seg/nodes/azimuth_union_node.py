@@ -55,8 +55,8 @@ class AzimuthUnionNode(Node):
     def __init__(self) -> None:
         super().__init__("azimuth_union")
 
-        self.declare_parameter("in_topics", ["/human_yolo_front/person_azimuth_ranges", "/human_yolo_rear/person_azimuth_ranges"])
-        self.declare_parameter("out_topic", "/human_yolo/person_azimuth_ranges")
+        self.declare_parameter("in_topics", ["/yolo_objects_front/target_azimuth_ranges", "/yolo_objects_rear/target_azimuth_ranges"])
+        self.declare_parameter("out_topic", "/yolo_objects/target_azimuth_ranges")
         self.declare_parameter("hold_seconds", 0.7)
         self.declare_parameter("angle_margin_rad", 0.06)
         self.declare_parameter("publish_rate_hz", 15.0)

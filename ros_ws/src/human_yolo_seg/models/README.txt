@@ -24,19 +24,19 @@ human_yolo_seg 模型目录说明
 
 也可以在启动时通过参数显式指定绝对路径，例如：
 
-  ros2 launch human_yolo_seg yolo_person_seg.launch.py model_path:=/absolute/path/yolo26n-seg.pt
+  ros2 launch human_yolo_seg yolo_object_seg.launch.py model_path:=/absolute/path/yolo26n-seg.pt
 
 4. 验证建议
 
-若需要验证人物模型在仿真中的检测效果，可重点检查：
+建议在仿真中核对（默认话题前缀 `/yolo_objects`）：
 
-- `/human_yolo/person_present`
-- `/human_yolo/person_count`
-- `/human_yolo/person_max_conf`
-- `/human_yolo/annotated_image`
+- `/yolo_objects/detection_present`
+- `/yolo_objects/detection_count`
+- `/yolo_objects/detection_max_conf`
+- `/yolo_objects/annotated_image`
 
 必要时可使用：
 
-  ros2 run human_yolo_seg yolo_person_watch
+  ros2 run human_yolo_seg yolo_object_watch
 
-对检测结果进行终端观察。
+对检测结果进行终端观察（兼容别名 `yolo_person_watch`）。

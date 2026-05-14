@@ -1,5 +1,5 @@
 """Layered entry for the existing YOLO detector node."""
 
-from human_yolo_seg.nodes.yolo_person_seg_node import YoloPersonSegNode, main
+from human_yolo_seg.nodes.yolo_object_seg_node import YoloObjectSegNode, main
 
-__all__ = ["YoloPersonSegNode", "main"]
+__all__ = ["YoloObjectSegNode", "main"]

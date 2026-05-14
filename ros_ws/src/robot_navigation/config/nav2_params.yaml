@@ -29,6 +29,7 @@ amcl:
     robot_model_type: nav2_amcl::DifferentialMotionModel
     save_pose_rate: 0.5
     scan_topic: /scan
+    # 仿真自动初值：否则须 RViz「2D Pose Estimate」后才有 map TF
     set_initial_pose: true
     initial_pose:
       x: 0.0

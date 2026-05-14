@@ -11,7 +11,8 @@ require_ros
 source_workspace_if_available
 prepare_output_dirs
 
-TB3_MODEL="${TURTLEBOT3_MODEL:-waffle}"
+# 使用 TB3_MODEL 作为显式入口，避免终端残留 TURTLEBOT3_MODEL=burger 污染导航启动。
+TB3_MODEL="${TB3_MODEL:-waffle}"
 MAP_FILE="${MAP_FILE:-${ROS_WS}/src/robot_bringup/maps/map.yaml}"
 PLANNER_TYPE="${PLANNER_TYPE:-astar}"
 PARAMS_FILE="${PARAMS_FILE:-}"
@@ -25,8 +26,12 @@ NAV_LAUNCH_PID=""
 cleanup() {
   local exit_code=$?
   if [[ -n "${NAV_LAUNCH_PID}" ]] && kill -0 "${NAV_LAUNCH_PID}" >/dev/null 2>&1; then
-    kill "${NAV_LAUNCH_PID}" >/dev/null 2>&1 || true
+    # 只 kill launch 父进程时，rviz2 / 各 nav2 子进程有时仍存活，终端会像「卡死」。
+    pkill -TERM -P "${NAV_LAUNCH_PID}" 2>/dev/null || true
+    sleep 0.4
+    kill -TERM "${NAV_LAUNCH_PID}" 2>/dev/null || true
     wait "${NAV_LAUNCH_PID}" 2>/dev/null || true
+    kill -KILL "${NAV_LAUNCH_PID}" 2>/dev/null || true
   fi
   bash "${PROJECT_ROOT}/scripts/tb3_stack.sh" stop >/dev/null 2>&1 || true
   exit "${exit_code}"
@@ -86,6 +91,9 @@ else
   PATROL_LAUNCH_VALUE="false"
 fi
 
+# map_server 对 map:= 路径在非 ASCII 目录下可能编码错误；拷到 /tmp 下 ASCII 路径再传给 Nav2（与 run_full_system 一致）
+NAV2_MAP_FILE="$(tj_nav2_map_yaml_ascii_workdir "${MAP_FILE}")/$(basename "${MAP_FILE}")"
+
 export TURTLEBOT3_MODEL="${TB3_MODEL}"
 export TB3_STACK_MODE="${TB3_STACK_MODE:-laser}"
 export TB3_ENABLE_SLAM=0
@@ -109,7 +117,8 @@ fi
 echo "[run_nav2] project_root=${PROJECT_ROOT}"
 echo "[run_nav2] workspace=${ROS_WS}"
 echo "[run_nav2] model=${TURTLEBOT3_MODEL}"
-echo "[run_nav2] map=${MAP_FILE}"
+echo "[run_nav2] map_source=${MAP_FILE}"
+echo "[run_nav2] map_nav2=${NAV2_MAP_FILE}"
 echo "[run_nav2] planner_type=${PLANNER_TYPE}"
 echo "[run_nav2] auto_patrol=${PATROL_ENABLED}"
 if [[ -n "${PARAMS_FILE}" ]]; then
@@ -128,7 +137,7 @@ echo "[2/2] Starting Nav2 localization + navigation stack"
 NAV2_ARGS=(
   "planner_type:=${PLANNER_TYPE}"
   "use_sim_time:=true"
-  "map:=${MAP_FILE}"
+  "map:=${NAV2_MAP_FILE}"
   "use_rviz:=${RVIZ_LAUNCH_VALUE}"
   "rviz_config:=${RVIZ_CONFIG_FILE}"
   "start_patrol:=${PATROL_LAUNCH_VALUE}"
@@ -148,5 +157,7 @@ else
   echo "[run_nav2] Auto patrol is disabled. Use RViz '2D Pose Estimate' and 'Nav2 Goal' manually."
 fi
 echo "[run_nav2] Logs: ${TB3_LOG_DIR}"
+echo "[run_nav2] 脚本会阻塞在此（wait Nav2）；结束请在本终端按 Ctrl+C，将清理 launch 子进程并 tb3_stack stop。"
+echo "[run_nav2] 若 Ctrl+C 无效：另开终端 kill ${NAV_LAUNCH_PID} 或 bash scripts/tb3_stack.sh stop"
 
 wait "${NAV_LAUNCH_PID}"

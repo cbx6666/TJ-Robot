@@ -4,7 +4,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# 导航等 launch：navigation.launch.py 若未显式传入 params_file，会优先读取该工作区源码里的 nav2_params.yaml
 ROS_WS="${PROJECT_ROOT}/ros_ws"
+export ROS_WS
 ROS_SETUP_BASH="${ROS_SETUP_BASH:-/opt/ros/humble/setup.bash}"
 
 safe_source() {
@@ -46,6 +48,8 @@ source_workspace_if_available() {
 prepare_output_dirs() {
   mkdir -p \
     "${PROJECT_ROOT}/data/logs" \
+    "${PROJECT_ROOT}/data/logs/simulation" \
+    "${PROJECT_ROOT}/data/logs/full_system" \
     "${PROJECT_ROOT}/data/results"
 }
 
@@ -55,4 +59,80 @@ require_command() {
     echo "ERROR: required command not found: ${cmd}" >&2
     exit 1
   fi
+}
+
+# ROS 2 / Nav2 launch 将 map:= 传入 map_server 时，若路径含非 ASCII（如中文目录名），可能被错误编码成
+# /mnt/e/study/u673Au5668... 这类不可用路径，导致 map_server configure 失败、/map 无发布者。
+# 将地图目录整份拷到 /tmp 下仅限 ASCII 的路径即可规避。
+tj_nav2_map_yaml_ascii_workdir() {
+  local src_yaml="$1"
+  local maps_dir
+  maps_dir="$(cd "$(dirname "${src_yaml}")" && pwd)"
+  local dest_dir
+  dest_dir="$(mktemp -d /tmp/tj_nav2_map.XXXXXX)"
+  cp -a "${maps_dir}/." "${dest_dir}/"
+  echo "${dest_dir}"
+}
+
+# 结束前一次后台拉的 Nav2（run_simulation 每次都会再起一条 ros2 launch，不杀会叠多套 /amcl）。
+# 说明：仅 pkill *.launch.py 不够——若 launch 父进程已退出而子节点仍存活（init 收养），
+# 其 cmdline 里不再有 launch 文件名，需再按 Humble 等安装路径下的 lib/nav2_* 可执行文件补杀。
+tj_kill_nav2_background_launch() {
+  echo "tj_kill_nav2_background_launch: 结束残留的 Nav2 launch ..."
+  pkill -f 'navigation\.launch\.py' 2>/dev/null || true
+  pkill -f 'tj_static_map_nav2\.launch\.py' 2>/dev/null || true
+  pkill -f 'ros2 launch robot_navigation' 2>/dev/null || true
+  sleep 1
+  echo "tj_kill_nav2_background_launch: 结束可能孤儿化的 Nav2 组件 (*/lib/nav2_* …) ..."
+  pkill -f '/lib/nav2_' 2>/dev/null || true
+  pkill -f '/libexec/nav2_' 2>/dev/null || true
+  sleep 1
+  pkill -9 -f '/lib/nav2_' 2>/dev/null || true
+  pkill -9 -f '/libexec/nav2_' 2>/dev/null || true
+}
+
+# 配合 navigation.launch.py 的 defer_navigation_autostart:=true：等 map_server 进入 active 后，对
+# lifecycle_manager_navigation 调用 manage_nodes(STARTUP)。避免 localization 与 navigation 同时
+# autostart 时 map_server configure 卡住，导致永远没有 map TF。
+tj_nav2_trigger_navigation_manager_startup_after_map_server() {
+  local max_map_wait="${NAV2_MAP_SERVER_ACTIVE_WAIT_SEC:-120}"
+  local ros_setup="${ROS_SETUP_BASH:-/opt/ros/humble/setup.bash}"
+  local ws_setup="${ROS_WS}/install/setup.bash"
+  if [[ ! -f "${ros_setup}" ]]; then
+    echo "tj_nav2_trigger_navigation_manager_startup_after_map_server: missing ${ros_setup}" >&2
+    return 1
+  fi
+  safe_source "${ros_setup}"
+  if [[ ! -f "${ws_setup}" ]]; then
+    echo "tj_nav2_trigger_navigation_manager_startup_after_map_server: missing ${ws_setup}" >&2
+    return 1
+  fi
+  safe_source "${ws_setup}"
+
+  local i=0
+  while (( i < max_map_wait )); do
+    if ros2 lifecycle get /map_server 2>/dev/null | grep -qF "State: active"; then
+      break
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  if (( i >= max_map_wait )); then
+    echo "tj_nav2_trigger_navigation_manager_startup_after_map_server: timeout waiting for map_server active" >&2
+    return 1
+  fi
+
+  i=0
+  while (( i < 120 )); do
+    if ros2 service list 2>/dev/null | grep -Fxq "/lifecycle_manager_navigation/manage_nodes"; then
+      if ros2 service call /lifecycle_manager_navigation/manage_nodes nav2_msgs/srv/ManageLifecycleNodes "{command: 1}"; then
+        echo "tj_nav2_trigger_navigation_manager_startup_after_map_server: navigation STARTUP ok"
+        return 0
+      fi
+    fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+  echo "tj_nav2_trigger_navigation_manager_startup_after_map_server: failed to call manage_nodes STARTUP" >&2
+  return 1
 }

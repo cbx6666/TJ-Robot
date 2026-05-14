@@ -1,5 +1,5 @@
 # pyright: reportMissingImports=false
-"""Perception bringup wrapper for YOLO/person pipeline."""
+"""Perception bringup: YOLO 多类物体检测链（yolo_object_seg）。"""
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -16,7 +16,7 @@ def generate_launch_description():
             DeclareLaunchArgument("use_sim_time", default_value="true"),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
-                    os.path.join(share, "launch", "yolo_person_seg.launch.py")
+                    os.path.join(share, "launch", "yolo_object_seg.launch.py")
                 ),
                 launch_arguments={
                     "use_sim_time": LaunchConfiguration("use_sim_time"),

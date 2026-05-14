@@ -1,0 +1,8 @@
+# 可选：本地语音识别（CPU/GPU）。安装后与 voice_gateway 参数 asr_backend=whisper_file / whisper_mic 配合。
+# pip install -r requirements-voice.txt
+#
+# whisper_mic（sounddevice）在 Linux/WSL 还需系统库 PortAudio，例如：
+#   sudo apt-get update && sudo apt-get install -y portaudio19-dev
+faster-whisper>=1.0.0
+sounddevice>=0.4.6
+numpy>=1.21

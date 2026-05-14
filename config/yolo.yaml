@@ -3,7 +3,7 @@ yolo:
   device: auto
   image_topic: /camera/image_raw
   camera_info_topic: /camera/camera_info
-  annotated_topic: /human_yolo/annotated_image
+  annotated_topic: /yolo_objects/annotated_image
   conf_threshold: 0.25
   imgsz: 640
   target_class_ids:

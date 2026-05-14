@@ -9,16 +9,31 @@ assist 模式不再用「合并 URDF + spawn_entity -file urdf」生成整机：
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-# 与 TurtleBot3 LDS（/scan）量程上限一致，见 waffle_sim_plugins_gazebo_fragment.xml
-TB3_LASER_RANGE_MAX_M = 3.5
+# 深度相机 far 与激光量程解耦：优质仿真/真机栈通常按传感器能力设远裁剪，不必锁 2D 激光上限。
+# 默认给足室内+一般走廊（米）；更小场景或需与旧行为一致可 export TB3_DEPTH_CLIP_FAR_M=3.5。
+# 改 far 后须让 tb3_stack 重新生成 spawn SDF（删 TB3_LOG_DIR 下 turtlebot3_*_spawn_with_depth.sdf 或 touch 源 model）。
+TB3_DEPTH_DEFAULT_CLIP_FAR_M = 20.0
+
+
+def _depth_far_clip_m() -> float:
+    raw = os.environ.get("TB3_DEPTH_CLIP_FAR_M", "").strip()
+    if not raw:
+        return float(TB3_DEPTH_DEFAULT_CLIP_FAR_M)
+    try:
+        v = float(raw)
+        return v if v > 0.11 else float(TB3_DEPTH_DEFAULT_CLIP_FAR_M)
+    except ValueError:
+        return float(TB3_DEPTH_DEFAULT_CLIP_FAR_M)
 
 
 def _parse_fragment() -> tuple[ET.Element, ET.Element]:
+    far_m = _depth_far_clip_m()
     link_xml = f"""
 <link name="camera_depth_frame">
   <sensor name="tb3_depth_sensor" type="depth">
@@ -34,7 +49,7 @@ def _parse_fragment() -> tuple[ET.Element, ET.Element]:
       </image>
       <clip>
         <near>0.1</near>
-        <far>{TB3_LASER_RANGE_MAX_M}</far>
+        <far>{far_m}</far>
       </clip>
     </camera>
     <plugin name="tb3_depth_only_plugin" filename="libgazebo_ros_camera.so">
