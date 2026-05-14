@@ -10,6 +10,10 @@
 - 语音输入接口 + LLM 路由接口（`robot_interaction`）。
 - mock 机械臂抓取/放置验证链路（`robot_manipulation`）。
 
+## 首次安装
+
+从零配置 ROS 2、构建工作区、以及可选的 LLM / 本地语音依赖，见 **[docs/first-time-setup.md](docs/first-time-setup.md)**。
+
 ## 仓库结构（单源）
 
 ```text
@@ -21,10 +25,14 @@ ros_ws/                ROS 2 工作空间（唯一运行源码）
     robot_interaction
     robot_manipulation
     robot_interfaces
-scripts/               构建/运行脚本
-data/                  logs/results 等运行产物
+    robot_navigation
+scripts/               构建与运行入口（Bash）
+data/                  logs/results 等运行产物（大文件见 .gitignore）
+config/                部分非 ROS 编排配置
 docs/                  架构与实验文档
 ```
+
+---
 
 ## 快速运行
 
@@ -32,7 +40,7 @@ docs/                  架构与实验文档
 bash scripts/build.sh
 bash scripts/run_simulation.sh         # 默认 RGBD 机器人（waffle + assist）
 bash scripts/run_mapping.sh            # 仅激光 + SLAM + RViz（建图常用）
-bash scripts/run_full_system.sh        # 语音/LLM/任务/mock抓放全链路
+bash scripts/run_full_system.sh        # 语音/LLM/任务/mock 抓放全链路（需先构建 + 可选 LLM/语音依赖）
 ```
 
 建图模式是否开启 Gazebo 界面（`gzclient`）：
@@ -50,12 +58,17 @@ TB3_MODEL=burger bash scripts/run_mapping.sh               # 显式切换模型�
 bash scripts/tb3_stack.sh stop
 ```
 
+---
+
 ## 约定
 
 - 所有可运行功能只在 `ros_ws/src` 维护。
 - `scripts/` 只做编排与自动化，不承载核心算法。
+- `ros_ws/build`、`ros_ws/install`、`ros_ws/log` 为 colcon 生成物，勿当作源码修改；见根目录 `.gitignore`。
 
 更多说明：
+
+- [docs/first-time-setup.md](docs/first-time-setup.md)（首次安装与环境准备）
 - [ros_ws/README.md](ros_ws/README.md)
 - [ros_ws/src/README.md](ros_ws/src/README.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)

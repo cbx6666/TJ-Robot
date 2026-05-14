@@ -18,6 +18,7 @@ setup(
     entry_points={
         "console_scripts": [
             "task_manager_node = robot_tasks.nodes.task_manager_node:main",
+            "command_executor_node = robot_tasks.nodes.command_executor_node:main",
         ],
     },
 )

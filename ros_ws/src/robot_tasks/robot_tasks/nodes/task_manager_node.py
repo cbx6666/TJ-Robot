@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import rclpy
 from geometry_msgs.msg import PointStamped
 from rclpy.node import Node
@@ -42,6 +44,8 @@ class TaskManagerNode(Node):
         self._status_pub = None
         self._status_str_pub = self.create_publisher(String, f"{self._status_topic}_text", 10)
         self._mani_cmd_pub = self.create_publisher(String, self._mani_command_topic, 10)
+        event_topic = str(self.get_parameter("event_topic").value)
+        self.create_subscription(String, event_topic, self._on_task_event, 10)
         self.create_subscription(String, self._goal_text_topic, self._on_goal_text, 10)
         self.create_subscription(PointStamped, self._target_point_topic, self._on_target_point, 10)
         self.create_subscription(String, self._target_label_topic, self._on_target_label, 10)
@@ -58,9 +62,23 @@ class TaskManagerNode(Node):
 
         self.create_timer(heartbeat_sec, self._publish_heartbeat)
         self.get_logger().info(
-            f"task_manager subscriptions: goal={self._goal_text_topic}; "
+            f"task_manager subscriptions: events={event_topic}; goal={self._goal_text_topic}; "
             f"target={self._target_point_topic}; outputs manipulation={self._mani_command_topic}"
         )
+
+    def _on_task_event(self, msg: String) -> None:
+        raw = (msg.data or "").strip()
+        if not raw:
+            return
+        self.get_logger().info(f"[task_manager] event: {raw}")
+        try:
+            ev = json.loads(raw)
+            if isinstance(ev, dict) and ev.get("event") == "patrol_start":
+                self._publish_status_event("EXECUTING", f"patrol_scope={ev.get('scope', '')}")
+            elif isinstance(ev, dict) and ev.get("event") == "navigate_done":
+                self._publish_status_event("DONE" if ev.get("ok") else "FAILED", raw[:200])
+        except (json.JSONDecodeError, TypeError):
+            pass
 
     def _publish_heartbeat(self) -> None:
         detail = "task_manager alive (placeholder dispatcher)"
@@ -117,7 +135,18 @@ class TaskManagerNode(Node):
 
     @staticmethod
     def _infer_object(text: str) -> str:
-        objects = ["杯子", "瓶子", "遥控器", "纸巾", "书"]
+        low = text.lower()
+        en_to_zh = {
+            "chair": "椅子",
+            "cup": "杯子",
+            "bottle": "瓶子",
+            "book": "书",
+            "cell phone": "手机",
+        }
+        for en, zh in en_to_zh.items():
+            if en in low:
+                return zh
+        objects = ["杯子", "瓶子", "遥控器", "纸巾", "书", "手机"]
         for obj in objects:
             if obj in text:
                 return obj

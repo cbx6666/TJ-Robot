@@ -20,28 +20,59 @@ def _inc(share: str, launch_file: str, args: dict[str, LaunchConfiguration]):
 def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     enable_mock_voice = LaunchConfiguration("enable_mock_voice")
+    speech_text_log_path = LaunchConfiguration("speech_text_log_path")
     voice_api_url = LaunchConfiguration("voice_api_url")
+    asr_backend = LaunchConfiguration("asr_backend")
     llm_api_url = LaunchConfiguration("llm_api_url")
     llm_model = LaunchConfiguration("llm_model")
+    llm_api_key_env = LaunchConfiguration("llm_api_key_env")
+    system_prompt_file = LaunchConfiguration("system_prompt_file")
+    parsed_intent_topic = LaunchConfiguration("parsed_intent_topic")
+    task_events_topic = LaunchConfiguration("task_events_topic")
+    navigate_to_pose_action = LaunchConfiguration("navigate_to_pose_action")
 
     share = get_package_share_directory("robot_bringup")
+    default_prompt = os.path.join(share, "config", "voice_llm_system_prompt.txt")
     return LaunchDescription([
         DeclareLaunchArgument("use_sim_time", default_value="true"),
-        DeclareLaunchArgument("enable_mock_voice", default_value="true"),
+        DeclareLaunchArgument("enable_mock_voice", default_value="false"),
+        DeclareLaunchArgument("speech_text_log_path", default_value=""),
         DeclareLaunchArgument("voice_api_url", default_value=""),
+        DeclareLaunchArgument("asr_backend", default_value="mock"),
         DeclareLaunchArgument("llm_api_url", default_value=""),
         DeclareLaunchArgument("llm_model", default_value="gpt-4o-mini"),
+        DeclareLaunchArgument("llm_api_key_env", default_value="TJ_LLM_API_KEY"),
+        DeclareLaunchArgument("system_prompt_file", default_value=default_prompt),
+        DeclareLaunchArgument(
+            "parsed_intent_topic",
+            default_value="/interaction/parsed_intent",
+        ),
+        DeclareLaunchArgument("task_events_topic", default_value="/task/events"),
+        DeclareLaunchArgument("navigate_to_pose_action", default_value="navigate_to_pose"),
         _inc(
             share,
             "interaction.launch.py",
             {
                 "use_sim_time": use_sim_time,
                 "enable_mock_voice": enable_mock_voice,
+                "speech_text_log_path": speech_text_log_path,
                 "voice_api_url": voice_api_url,
+                "asr_backend": asr_backend,
                 "llm_api_url": llm_api_url,
                 "llm_model": llm_model,
+                "llm_api_key_env": llm_api_key_env,
+                "system_prompt_file": system_prompt_file,
             },
         ),
-        _inc(share, "task_manager.launch.py", {"use_sim_time": use_sim_time}),
+        _inc(
+            share,
+            "task_manager.launch.py",
+            {
+                "use_sim_time": use_sim_time,
+                "parsed_intent_topic": parsed_intent_topic,
+                "task_events_topic": task_events_topic,
+                "navigate_to_pose_action": navigate_to_pose_action,
+            },
+        ),
         _inc(share, "manipulation.launch.py", {"use_sim_time": use_sim_time}),
     ])

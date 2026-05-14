@@ -49,6 +49,7 @@ prepare_output_dirs() {
   mkdir -p \
     "${PROJECT_ROOT}/data/logs" \
     "${PROJECT_ROOT}/data/logs/simulation" \
+    "${PROJECT_ROOT}/data/logs/full_system" \
     "${PROJECT_ROOT}/data/results"
 }
 
