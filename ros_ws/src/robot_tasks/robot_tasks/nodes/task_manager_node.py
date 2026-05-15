@@ -75,6 +75,16 @@ class TaskManagerNode(Node):
             ev = json.loads(raw)
             if isinstance(ev, dict) and ev.get("event") == "patrol_start":
                 self._publish_status_event("EXECUTING", f"patrol_scope={ev.get('scope', '')}")
+            elif isinstance(ev, dict) and ev.get("event") == "patrol_done":
+                if ev.get("canceled"):
+                    state = "CANCELED"
+                else:
+                    state = "DONE" if ev.get("ok") else "FAILED"
+                detail = (
+                    f"patrol_done ok={bool(ev.get('ok'))} canceled={bool(ev.get('canceled'))} "
+                    f"completed={ev.get('completed_waypoints', 'NA')}/{ev.get('total_waypoints', 'NA')}"
+                )
+                self._publish_status_event(state, detail)
             elif isinstance(ev, dict) and ev.get("event") == "navigate_done":
                 self._publish_status_event("DONE" if ev.get("ok") else "FAILED", raw[:200])
         except (json.JSONDecodeError, TypeError):
