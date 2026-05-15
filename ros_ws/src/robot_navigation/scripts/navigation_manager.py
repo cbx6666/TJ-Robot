@@ -218,9 +218,6 @@ class NavigationManager:
             "patrol_failed_corridor_ttl_sec", 240.0
         )
         self._failed_corridor_max = self._int_param("patrol_failed_corridor_max", 12)
-        self._failed_corridor_start_grace_m = self._float_param(
-            "patrol_failed_corridor_start_grace_m", 0.25
-        )
 
         # ---------- approach goal 生成 ----------
         # 原始 waypoint 不一定是最好的到达姿态；这里在同一巡视点附近生成可替代 approach pose。
@@ -600,7 +597,9 @@ class NavigationManager:
             return None
         if self._stuck_cmd_required and cmd_ratio <= 0.05:
             return None
-        if moved >= self._stuck_min_progress_m:
+        # 留一点小容差，避免 0.079m vs 0.080m 这种毫米级边界把慢速移动误判成卡死。
+        progress_epsilon_m = min(0.02, self._stuck_min_progress_m * 0.25)
+        if moved + progress_epsilon_m >= self._stuck_min_progress_m:
             return None
 
         pose = self._latest_pose
@@ -983,8 +982,8 @@ class NavigationManager:
         """检查候选路线是否重新穿过失败路径段。
 
         如果机器人当前仍在 corridor 半径内，会先允许路径“离开 corridor”。只有路径已经离开
-        之后再次进入 corridor，才判定为命中。这个小滞回避免“刚脱困后所有路径起点都在
-        黑名单里，导致无法重新规划”的问题。
+        之后再次进入 corridor，才判定为命中。这样刚 escape 后不会因为起点仍贴着失败
+        路径段，就把所有候选路线都拒绝掉。
         """
 
         if not self._failed_corridor_enabled or not self._failed_corridors:
@@ -1024,16 +1023,13 @@ class NavigationManager:
                 cx, cy = nearest_point
                 distance = math.hypot(px - cx, py - cy)
                 if not left_corridor[corridor.corridor_id]:
-                    # 起点还在 corridor 内时：
-                    # 1. 先允许 `start_grace_m` 以内的路径离开；
-                    # 2. 一旦路径走出 1.4 倍半径，之后再进入就算复用失败走廊；
-                    # 3. 如果超过 grace 仍贴在 corridor 里，也立即开始按命中处理。
+                    # 起点还在 corridor 内时，不用固定距离强行截断。路径必须先穿过
+                    # 当前所在的黑名单区域才能离开，所以这段连续重合不算“复用失败路”。
+                    # 只有第一次离开 corridor 后，再次进入才算真正命中。
                     if distance > corridor.radius_m * 1.4:
                         left_corridor[corridor.corridor_id] = True
-                    elif distance_from_start <= self._failed_corridor_start_grace_m:
-                        continue
                     else:
-                        left_corridor[corridor.corridor_id] = True
+                        continue
                 if distance <= corridor.radius_m:
                     self._navigator.get_logger().warn(
                         f"FAILED_CORRIDOR_HIT corridor_id={corridor.corridor_id} "
@@ -1041,8 +1037,7 @@ class NavigationManager:
                         f"path_point=({px:.2f},{py:.2f}) "
                         f"corridor_point=({cx:.2f},{cy:.2f}) "
                         f"distance={distance:.2f} radius={corridor.radius_m:.2f} "
-                        f"path_s={distance_from_start:.2f} "
-                        f"start_grace={self._failed_corridor_start_grace_m:.2f}"
+                        f"path_s={distance_from_start:.2f}"
                     )
                     return True
         return False
@@ -1491,7 +1486,6 @@ class NavigationManager:
                     "patrol_failed_corridor_ahead_m": 2.00,
                     "patrol_failed_corridor_ttl_sec": 240.0,
                     "patrol_failed_corridor_max": 12,
-                    "patrol_failed_corridor_start_grace_m": 0.25,
                 },
             ),
             (

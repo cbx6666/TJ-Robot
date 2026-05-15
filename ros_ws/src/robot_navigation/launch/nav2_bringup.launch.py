@@ -1,5 +1,11 @@
 # pyright: reportMissingImports=false
-"""Explicit Nav2 bringup for the indoor patrol stack."""
+"""Explicit Nav2 bringup for the indoor patrol stack.
+
+启动顺序必须保守：
+1. map_server 先进入 active，确保 /map 已经发布；
+2. AMCL 再 configure/active，避免 configure 阶段等不到地图；
+3. planner/controller 最后启动，避免 global costmap 在 map->odom 还不存在时卡住。
+"""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, TimerAction
@@ -34,6 +40,10 @@ def generate_launch_description() -> LaunchDescription:
     use_sim_time_param = ParameterValue(use_sim_time, value_type=bool)
     autostart_param = ParameterValue(autostart, value_type=bool)
     common_params = {"use_sim_time": use_sim_time_param}
+    lifecycle_common_params = {
+        "use_sim_time": use_sim_time_param,
+        "autostart": autostart_param,
+    }
 
     navigation_nodes = [
         _nav2_node(
@@ -79,8 +89,14 @@ def generate_launch_description() -> LaunchDescription:
             parameters=[
                 params_file,
                 {
-                    "use_sim_time": use_sim_time_param,
-                    "autostart": autostart_param,
+                    **lifecycle_common_params,
+                    "node_names": [
+                        "controller_server",
+                        "planner_server",
+                        "behavior_server",
+                        "bt_navigator",
+                        "waypoint_follower",
+                    ],
                 },
             ],
         ),
@@ -150,17 +166,37 @@ def generate_launch_description() -> LaunchDescription:
             Node(
                 package="nav2_lifecycle_manager",
                 executable="lifecycle_manager",
-                name="lifecycle_manager_localization",
+                name="lifecycle_manager_map",
                 output="screen",
                 parameters=[
                     params_file,
                     {
-                        "use_sim_time": use_sim_time_param,
-                        "autostart": autostart_param,
+                        **lifecycle_common_params,
+                        "node_names": ["map_server"],
                     },
                 ],
             ),
-            # Let map_server and AMCL publish /map and map->odom before global_costmap activates.
-            TimerAction(period=6.0, actions=navigation_nodes),
+            # map_server active 后 AMCL 才能稳定拿到 /map；否则 AMCL configure 偶发卡住，
+            # 后续 planner 会一直报 Invalid frame ID "map"。
+            TimerAction(
+                period=3.0,
+                actions=[
+                    Node(
+                        package="nav2_lifecycle_manager",
+                        executable="lifecycle_manager",
+                        name="lifecycle_manager_amcl",
+                        output="screen",
+                        parameters=[
+                            params_file,
+                            {
+                                **lifecycle_common_params,
+                                "node_names": ["amcl"],
+                            },
+                        ],
+                    )
+                ],
+            ),
+            # 等 map_server 和 AMCL 都有时间发布 /map 与 map->odom，再启动 navigation。
+            TimerAction(period=12.0, actions=navigation_nodes),
         ]
     )

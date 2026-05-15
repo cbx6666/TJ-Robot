@@ -138,10 +138,6 @@ def _include_selected_nav2(context, *args, **kwargs):
                                 LaunchConfiguration("patrol_failed_corridor_max"),
                                 value_type=int,
                             ),
-                            "patrol_failed_corridor_start_grace_m": ParameterValue(
-                                LaunchConfiguration("patrol_failed_corridor_start_grace_m"),
-                                value_type=float,
-                            ),
                             "patrol_approach_offsets_enabled": ParameterValue(
                                 LaunchConfiguration("patrol_approach_offsets_enabled"),
                                 value_type=bool,
@@ -335,11 +331,6 @@ def generate_launch_description() -> LaunchDescription:
                 "patrol_failed_corridor_max",
                 default_value="12",
                 description="Maximum failed corridors to remember.",
-            ),
-            DeclareLaunchArgument(
-                "patrol_failed_corridor_start_grace_m",
-                default_value="0.25",
-                description="Initial path distance allowed while leaving a corridor that contains the current pose.",
             ),
             DeclareLaunchArgument(
                 "patrol_approach_offsets_enabled",
