@@ -11,7 +11,7 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def _nav2_node(package: str, executable: str, name: str, params_file, common_params):
-    # remap /tf 到相对 tf，后续如加 namespace 时也能保持 Nav2 官方 bringup 的行为。
+    # Remap /tf to relative names so future namespaces keep Nav2's expected behavior.
     tf_remaps = [("/tf", "tf"), ("/tf_static", "tf_static")]
     return Node(
         package=package,
@@ -33,7 +33,6 @@ def generate_launch_description() -> LaunchDescription:
 
     use_sim_time_param = ParameterValue(use_sim_time, value_type=bool)
     autostart_param = ParameterValue(autostart, value_type=bool)
-
     common_params = {"use_sim_time": use_sim_time_param}
 
     navigation_nodes = [

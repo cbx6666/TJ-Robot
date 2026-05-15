@@ -10,7 +10,16 @@ install(DIRECTORY
 )
 
 install(PROGRAMS
+  scripts/coverage_monitor.py
   scripts/patrol_waypoints.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(FILES
+  scripts/coverage_planner.py
+  scripts/navigation_manager.py
+  scripts/patrol_markers.py
+  scripts/waypoint_utils.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
