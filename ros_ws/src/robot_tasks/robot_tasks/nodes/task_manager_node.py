@@ -25,7 +25,9 @@ class TaskManagerNode(Node):
         self.declare_parameter("event_topic", "/task/events")
         self.declare_parameter("status_topic", "/task/status")
         self.declare_parameter("goal_text_topic", "/task/goal_text")
-        self.declare_parameter("manipulation_command_topic", "/manipulation/command_text")
+        self.declare_parameter(
+            "manipulation_command_topic", "/manipulation/command_text"
+        )
         self.declare_parameter("target_point_topic", "/yolo_objects/target_point_map")
         self.declare_parameter("target_label_topic", "/yolo_objects/target_label")
         self.declare_parameter("heartbeat_sec", 2.0)
@@ -34,7 +36,9 @@ class TaskManagerNode(Node):
         self._status_topic = str(self.get_parameter("status_topic").value)
         self._task_id = str(self.get_parameter("task_id").value)
         self._goal_text_topic = str(self.get_parameter("goal_text_topic").value)
-        self._mani_command_topic = str(self.get_parameter("manipulation_command_topic").value)
+        self._mani_command_topic = str(
+            self.get_parameter("manipulation_command_topic").value
+        )
         self._target_point_topic = str(self.get_parameter("target_point_topic").value)
         self._target_label_topic = str(self.get_parameter("target_label_topic").value)
         heartbeat_sec = max(float(self.get_parameter("heartbeat_sec").value), 0.2)
@@ -42,13 +46,19 @@ class TaskManagerNode(Node):
         self._latest_target_label = ""
 
         self._status_pub = None
-        self._status_str_pub = self.create_publisher(String, f"{self._status_topic}_text", 10)
+        self._status_str_pub = self.create_publisher(
+            String, f"{self._status_topic}_text", 10
+        )
         self._mani_cmd_pub = self.create_publisher(String, self._mani_command_topic, 10)
         event_topic = str(self.get_parameter("event_topic").value)
         self.create_subscription(String, event_topic, self._on_task_event, 10)
         self.create_subscription(String, self._goal_text_topic, self._on_goal_text, 10)
-        self.create_subscription(PointStamped, self._target_point_topic, self._on_target_point, 10)
-        self.create_subscription(String, self._target_label_topic, self._on_target_label, 10)
+        self.create_subscription(
+            PointStamped, self._target_point_topic, self._on_target_point, 10
+        )
+        self.create_subscription(
+            String, self._target_label_topic, self._on_target_label, 10
+        )
         if TaskStatus is not None:
             self._status_pub = self.create_publisher(TaskStatus, self._status_topic, 10)
             self.get_logger().info(
@@ -74,7 +84,9 @@ class TaskManagerNode(Node):
         try:
             ev = json.loads(raw)
             if isinstance(ev, dict) and ev.get("event") == "patrol_start":
-                self._publish_status_event("EXECUTING", f"patrol_scope={ev.get('scope', '')}")
+                self._publish_status_event(
+                    "EXECUTING", f"patrol_scope={ev.get('scope', '')}"
+                )
             elif isinstance(ev, dict) and ev.get("event") == "patrol_done":
                 if ev.get("canceled"):
                     state = "CANCELED"
@@ -86,7 +98,9 @@ class TaskManagerNode(Node):
                 )
                 self._publish_status_event(state, detail)
             elif isinstance(ev, dict) and ev.get("event") == "navigate_done":
-                self._publish_status_event("DONE" if ev.get("ok") else "FAILED", raw[:200])
+                self._publish_status_event(
+                    "DONE" if ev.get("ok") else "FAILED", raw[:200]
+                )
         except (json.JSONDecodeError, TypeError):
             pass
 

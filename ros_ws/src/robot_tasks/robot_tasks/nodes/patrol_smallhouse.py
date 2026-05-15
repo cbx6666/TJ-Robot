@@ -73,9 +73,15 @@ class PatrolExecutor:
         self._is_patrolling = False
 
         self._navigator.declare_parameter("task_events_topic", "/task/events")
-        self._events_topic = str(self._navigator.get_parameter("task_events_topic").value)
-        self._events_pub = self._navigator.create_publisher(String, self._events_topic, 10)
-        self._navigator.create_subscription(String, self._events_topic, self._on_task_event, 10)
+        self._events_topic = str(
+            self._navigator.get_parameter("task_events_topic").value
+        )
+        self._events_pub = self._navigator.create_publisher(
+            String, self._events_topic, 10
+        )
+        self._navigator.create_subscription(
+            String, self._events_topic, self._on_task_event, 10
+        )
 
         self._navigator.get_logger().info(
             f"[patrol_smallhouse] 已订阅任务事件: {self._events_topic}"
@@ -97,7 +103,9 @@ class PatrolExecutor:
         event_name = str(event.get("event", "")).strip()
         if event_name == "patrol_start":
             if self._is_patrolling:
-                self._navigator.get_logger().info("[patrol_smallhouse] 巡航已在进行中，忽略重复启动")
+                self._navigator.get_logger().info(
+                    "[patrol_smallhouse] 巡航已在进行中，忽略重复启动"
+                )
                 return
             self._start_requested = True
             scope = str(event.get("scope", "room_default"))
@@ -108,10 +116,14 @@ class PatrolExecutor:
 
         if event_name == "stop" and self._is_patrolling:
             self._cancel_requested = True
-            self._navigator.get_logger().info("[patrol_smallhouse] 收到 stop，准备取消当前巡航")
+            self._navigator.get_logger().info(
+                "[patrol_smallhouse] 收到 stop，准备取消当前巡航"
+            )
 
     def run_forever(self) -> None:
-        self._navigator.get_logger().info("发布 AMCL 初始位姿，等待 Nav2 lifecycle 节点进入 active...")
+        self._navigator.get_logger().info(
+            "发布 AMCL 初始位姿，等待 Nav2 lifecycle 节点进入 active..."
+        )
         self._navigator.setInitialPose(make_pose(self._navigator, INITIAL_POSE))
         self._navigator.waitUntilNav2Active(localizer="amcl")
         self._navigator.get_logger().info("Nav2 已就绪，等待 patrol_start 任务事件。")
@@ -166,7 +178,9 @@ class PatrolExecutor:
                     )
 
                 if self._cancel_requested:
-                    self._navigator.get_logger().info("[patrol_smallhouse] 巡航被 stop 事件打断")
+                    self._navigator.get_logger().info(
+                        "[patrol_smallhouse] 巡航被 stop 事件打断"
+                    )
                     break
 
             patrol_ok = (not self._cancel_requested) and (not has_failure)
