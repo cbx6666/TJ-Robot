@@ -47,5 +47,17 @@ def generate_launch_description():
                     }
                 ],
             ),
+            Node(
+                package="robot_tasks",
+                executable="patrol_smallhouse",
+                name="patrol_smallhouse",
+                output="screen",
+                parameters=[
+                    {
+                        "use_sim_time": use_sim_time,
+                        "task_events_topic": task_events_topic,
+                    }
+                ],
+            ),
         ]
     )
