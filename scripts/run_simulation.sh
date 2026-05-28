@@ -18,10 +18,9 @@ export TB3_ASSIST_SCAN_FILTER="${TB3_ASSIST_SCAN_FILTER:-1}"
 export TB3_ENABLE_SLAM=0
 # 工程内统一日志目录（须 export：子进程 tb3_stack 会继承；否则会落回 /tmp/tb3_stack 且本脚本里 TB3_LOG_DIR 未定义）
 export TB3_LOG_DIR="${TB3_LOG_DIR:-${PROJECT_ROOT}/data/logs/simulation}"
-# 默认相机刷新率 8Hz（与此前 run_simulation 行为一致）；未 export 时 tb3_stack 默认 2Hz
-export TB3_CAMERA_UPDATE_RATE="${TB3_CAMERA_UPDATE_RATE:-8}"
-# 避免 Gazebo 传感器在“无订阅时才渲染”的路径上抖停；与 tb3_stack 默认 0 区分开
-export TB3_CAMERA_ALWAYS_ON="${TB3_CAMERA_ALWAYS_ON:-1}"
+export TB3_QUIET_NAV2_CLEANUP="${TB3_QUIET_NAV2_CLEANUP:-1}"
+# shellcheck source=lib/tb3_sim_assist_env.sh
+source "${SCRIPT_DIR}/lib/tb3_sim_assist_env.sh"
 MAP_FILE="${MAP_FILE:-${ROS_WS}/src/robot_bringup/maps/map.yaml}"
 PARAMS_FILE="${PARAMS_FILE:-${ROS_WS}/src/robot_navigation/config/nav2_params.yaml}"
 NAV_LAUNCH_FILE="${ROS_WS}/src/robot_navigation/launch/navigation.launch.py"
@@ -47,7 +46,12 @@ bash "${PROJECT_ROOT}/scripts/tb3_stack.sh" start
 echo "Stopping duplicate Nav2 from previous runs (if any) ..."
 tj_kill_nav2_background_launch
 
-echo "Starting Nav2 with static map: ${MAP_FILE} -> ${NAV2_MAP_FILE} (ASCII workdir avoids launch path mangling)"
+echo "Starting Nav2 -> ${TB3_LOG_DIR}/nav2.launch.log（控制台仅启动摘要）"
+mkdir -p "${TB3_LOG_DIR}"
+{
+  echo "===== Nav2 launch $(date -Iseconds 2>/dev/null || date) ====="
+  echo "  map:=${NAV2_MAP_FILE}"
+} >"${TB3_LOG_DIR}/nav2.launch.log"
 ROS_SETUP_BASH="${ROS_SETUP_BASH:-/opt/ros/humble/setup.bash}"
 WS_SETUP_BASH="${PROJECT_ROOT}/ros_ws/install/setup.bash"
 (
@@ -67,10 +71,11 @@ WS_SETUP_BASH="${PROJECT_ROOT}/ros_ws/install/setup.bash"
     "map:=${NAV2_MAP_FILE}" \
     "params_file:=${PARAMS_FILE}" \
     "defer_navigation_autostart:=true"
-) >"${TB3_LOG_DIR}/nav2.launch.log" 2>&1 &
-echo "Nav2 started in background (PID=$!). Logs: ${TB3_LOG_DIR}/nav2.launch.log"
+) >>"${TB3_LOG_DIR}/nav2.launch.log" 2>&1 &
+echo "Nav2 started in background (PID=$!). tail -f ${TB3_LOG_DIR}/nav2.launch.log"
 (
   set +e
   tj_nav2_trigger_navigation_manager_startup_after_map_server
 ) >>"${TB3_LOG_DIR}/nav2_deferred_navigation.log" 2>&1 &
-echo "Deferred navigation lifecycle STARTUP helper started (log: ${TB3_LOG_DIR}/nav2_deferred_navigation.log)"
+echo "Deferred Nav2 lifecycle -> ${TB3_LOG_DIR}/nav2_deferred_navigation.log"
+echo "停仿真请执行: bash scripts/tb3_stack.sh stop  （仍卡请: bash scripts/kill_simulation_stack.sh）"

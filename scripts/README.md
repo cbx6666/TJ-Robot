@@ -38,7 +38,11 @@
 - `run_search_task.sh`
   - 启动任务演示链路
 - `run_full_system.sh`
-  - 启动完整系统链路
+  - **推荐一键**：仿真 + Nav2 + YOLO + LLM/任务；默认 RViz「Sim Speech」模拟语音（无麦）
+- `run_voice_stack.sh` / `run_full_system_base.sh`
+  - 可选：仅重开 LLM 栈，或仅仿真底座（改代码后免重开 Gazebo）
+- `lib/tb3_sim_assist_env.sh`
+  - `run_simulation` / `run_full_system` 共用的一体 RGB-D 与 YOLO 话题默认值
 - `bootstrap.sh`
   - 环境准备与快速自检入口
 

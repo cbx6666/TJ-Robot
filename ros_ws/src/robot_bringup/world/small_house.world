@@ -56,57 +56,12 @@
         </include>
         <pose frame=''>3.295503 4.225674 0.318684 0 -0 0</pose>
 	</model>
-    
-    <!-- quick test ball for turtlebot3 -->
-    <!-- 
-	<model name='Ball_01_002'>
-        <include>
-            <uri>model://aws_robomaker_residential_Ball_01</uri>
-        </include>
-        <pose frame=''>-3.665503 -0.4874 0.318684 0 -0 0</pose>
-	</model>
-    -->
-
-    <!-- bedroom ball -->
   <model name='Ball_01_003'>
         <static>true</static>      
         <include>
             <uri>model://aws_robomaker_residential_Ball_01</uri>
         </include>
         <pose frame=''>-6.945503 -4.22174 0.318684 0 -0 0</pose>
-	</model>
-
-    <!-- Custom Apple (Red Sphere) -->
-	<model name='Apple_001'>
-      <pose frame=''>4.0 -1.0 0.1 0 0 0</pose>
-      <link name='link'>
-        <inertial>
-          <mass>0.15</mass>
-          <inertia>
-            <ixx>0.0001</ixx>
-            <iyy>0.0001</iyy>
-            <izz>0.0001</izz>
-          </inertia>
-        </inertial>
-        <collision name='collision'>
-          <geometry>
-            <sphere>
-              <radius>0.1</radius>
-            </sphere>
-          </geometry>
-        </collision>
-        <visual name='visual'>
-          <geometry>
-            <sphere>
-              <radius>0.1</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.8 0.1 0.1 1</ambient>
-            <diffuse>0.8 0.1 0.1 1</diffuse>
-          </material>
-        </visual>
-      </link>
 	</model>
 
     <model name='beer'>
@@ -223,75 +178,6 @@
         <kinematic>0</kinematic>
       </link>
       <pose>1.45 -1.70 0.6 0 -0 0</pose>
-    </model>
-
-    <model name='cricket_ball'>
-      <link name='link'>
-        <pose>0 0 0.2 0 -0 0</pose>
-        <inertial>
-          <mass>0.1467</mass>
-          <inertia>
-            <ixx>8.25187e-05</ixx>
-            <ixy>0</ixy>
-            <ixz>0</ixz>
-            <iyy>8.25187e-05</iyy>
-            <iyz>0</iyz>
-            <izz>8.25187e-05</izz>
-          </inertia>
-          <pose>0 0 0 0 -0 0</pose>
-        </inertial>
-        <collision name='collision'>
-          <geometry>
-            <sphere>
-              <radius>0.2</radius>
-            </sphere>
-          </geometry>
-          <surface>
-            <contact>
-              <poissons_ratio>0.347</poissons_ratio>
-              <elastic_modulus>8.8e+09</elastic_modulus>
-              <ode>
-                <kp>100000</kp>
-                <kd>100</kd>
-                <max_vel>100</max_vel>
-                <min_depth>0.001</min_depth>
-              </ode>
-            </contact>
-            <friction>
-              <torsional>
-                <coefficient>1</coefficient>
-                <use_patch_radius>0</use_patch_radius>
-                <surface_radius>0.01</surface_radius>
-                <ode/>
-              </torsional>
-              <ode/>
-            </friction>
-            <bounce/>
-          </surface>
-          <max_contacts>10</max_contacts>
-        </collision>
-        <visual name='visual'>
-          <geometry>
-            <sphere>
-              <radius>0.2</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <script>
-              <uri>file://media/materials/scripts/gazebo.material</uri>
-              <name>Gazebo/Red</name>
-            </script>
-          </material>
-        </visual>
-        <velocity_decay>
-          <linear>0</linear>
-          <angular>0.005</angular>
-        </velocity_decay>
-        <self_collide>0</self_collide>
-        <enable_wind>0</enable_wind>
-        <kinematic>0</kinematic>
-      </link>
-      <pose>4.26426 -4.17325 0 0 -0 0</pose>
     </model>
 
 	<model name='Bed_01_001'>

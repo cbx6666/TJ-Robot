@@ -28,10 +28,10 @@ class DepthImageToViz(Node):
     def __init__(self) -> None:
         super().__init__("depth_image_to_viz")
         self._last_bad_enc_log = 0.0
-        self.declare_parameter("in_topic", "/tb3_depth_only/depth/image_raw")
+        self.declare_parameter("in_topic", "/camera/depth/image_raw")
         self.declare_parameter("out_topic", "/camera/depth/viz_mono8")
-        # 与 TB3 激光/深度常用量程上限一致（Gazebo clip far 约 3.5 m）
-        self.declare_parameter("max_range_m", 3.5)
+        # 与 TB3_DEPTH_CLIP_FAR_M / YOLO depth_max 一致（勿再用 3.5 把远深度裁成一片黑）
+        self.declare_parameter("max_range_m", 12.0)
         in_topic = self.get_parameter("in_topic").get_parameter_value().string_value
         out_topic = self.get_parameter("out_topic").get_parameter_value().string_value
         self._max_range = float(self.get_parameter("max_range_m").value)

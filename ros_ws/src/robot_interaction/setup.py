@@ -19,6 +19,7 @@ setup(
         "console_scripts": [
             "voice_gateway_node = robot_interaction.nodes.voice_gateway_node:main",
             "llm_router_node = robot_interaction.nodes.llm_router_node:main",
+            "sim_speech_gui_node = robot_interaction.nodes.sim_speech_gui_node:main",
         ],
     },
 )

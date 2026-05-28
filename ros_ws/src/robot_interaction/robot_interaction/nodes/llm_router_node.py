@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -18,6 +19,45 @@ def _load_text_file(path: str) -> str:
     if not p.is_file():
         return ""
     return p.read_text(encoding="utf-8").strip()
+
+
+def _normalize_api_key_for_http(raw: str) -> str:
+    """去除 .env / 复制粘贴里常见的不可见字符与 Unicode 空白，便于通过 http.client 的 latin-1 头编码。"""
+    s = (raw or "").strip().lstrip("\ufeff")
+    s = unicodedata.normalize("NFKC", s)
+    s = s.replace("\r", "").replace("\n", "")
+    s = re.sub(r"[\u200b-\u200f\u202a-\u202e\u2060\u2062\u2063\ufeff]", "", s)
+    s = re.sub(r"[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]+", "", s)
+    return s.strip()
+
+
+def _api_key_for_bearer_header(raw: str) -> tuple[str, str | None]:
+    """返回 (key, tag)。tag 为 None 表示可用；为 stripped_non_ascii 表示已剥除非 ASCII；为 empty/其它字符串表示失败且 key 为空。"""
+    key = _normalize_api_key_for_http(raw)
+    if not key:
+        return "", "empty"
+
+    def _latin1_ok(s: str) -> bool:
+        try:
+            s.encode("latin-1")
+            return True
+        except UnicodeEncodeError:
+            return False
+
+    if _latin1_ok(f"Bearer {key}"):
+        return key, None
+
+    ascii_key = "".join(c for c in key if ord(c) < 128)
+    if ascii_key and _latin1_ok(f"Bearer {ascii_key}"):
+        return ascii_key, "stripped_non_ascii" if ascii_key != key else None
+
+    hdr = f"Bearer {key}"
+    for i, ch in enumerate(hdr):
+        try:
+            ch.encode("latin-1")
+        except UnicodeEncodeError:
+            return "", f"char_at_bearer_offset_{i}=U+{ord(ch):04X}_name={unicodedata.name(ch, '?')}"
+    return "", "latin1"
 
 
 def _extract_json_object(text: str) -> dict[str, Any] | None:
@@ -36,6 +76,80 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
         return json.loads(m.group(0))
     except json.JSONDecodeError:
         return None
+
+
+def _turn_direction_sign(user_text: str) -> int | None:
+    t = (user_text or "").strip()
+    if not t:
+        return None
+    low = t.lower()
+    if re.search(r"向右|右转|往右|朝右", t):
+        return -1
+    if re.search(r"向左|左转|往左|朝左", t):
+        return 1
+    if "逆时针" in t:
+        return 1
+    if "顺时针" in t:
+        return -1
+    if re.search(r"\b(turn\s+)?right\b", low) or re.search(r"\bright\b", low):
+        return -1
+    if re.search(r"\b(turn\s+)?left\b", low) or re.search(r"\bleft\b", low):
+        return 1
+    if re.search(r"\bccw\b", low):
+        return 1
+    if re.search(r"\bcw\b", low) or "clockwise" in low:
+        return -1
+    return None
+
+
+def _parse_turn_magnitude_deg(user_text: str) -> float:
+    t = (user_text or "").strip()
+    m = re.search(r"(-?\d+(?:\.\d+)?)\s*度", t)
+    if m:
+        return abs(float(m.group(1)))
+    if "180" in t:
+        return 180.0
+    if "90" in t:
+        return 90.0
+    return 0.0
+
+
+def _fix_turn_intent(obj: dict[str, Any], user_text: str) -> dict[str, Any]:
+    """LLM/离线输出后统一：左转为正 relative_yaw_deg，右转为负。"""
+    if str(obj.get("command", "")).strip() != "navigate_to_pose":
+        return obj
+    args = obj.get("args") if isinstance(obj.get("args"), dict) else {}
+    args = dict(args)
+    text = str(args.get("user_request_zh") or user_text or "").strip()
+    if text:
+        args["user_request_zh"] = text
+    yaw_only = bool(args.get("yaw_only") or args.get("rotate_in_place"))
+    rel_raw = args.get("relative_yaw_deg", args.get("yaw_delta_deg"))
+    try:
+        rel = float(rel_raw) if rel_raw is not None and rel_raw != "" else None
+    except (TypeError, ValueError):
+        rel = None
+    if rel is None and not yaw_only and not any(k in text for k in ("转", "转身", "旋转")):
+        return {**obj, "args": args}
+
+    sign_hint = _turn_direction_sign(text)
+    mag = abs(rel) if rel is not None else _parse_turn_magnitude_deg(text)
+    if mag <= 0.0:
+        mag = _parse_turn_magnitude_deg(text)
+    if mag <= 0.0:
+        return {**obj, "args": args}
+
+    if sign_hint is not None:
+        signed = float(sign_hint) * mag
+    elif rel is not None:
+        signed = float(rel)
+    else:
+        signed = mag
+
+    args["yaw_only"] = True
+    args["relative_yaw_deg"] = signed
+    args.pop("yaw_delta_deg", None)
+    return {**obj, "args": args}
 
 
 def _offline_plan(user_text: str) -> dict[str, Any]:
@@ -67,11 +181,20 @@ def _offline_plan(user_text: str) -> dict[str, Any]:
         }
     if any(k in t for k in ("拿", "取", "帮我拿", "抓", "递给我")):
         label = "object"
-        for w in ("椅子", "杯", "瓶子", "书", "手机"):
+        for w, en in (
+            ("椅子", "chair"),
+            ("杯子", "cup"),
+            ("水杯", "cup"),
+            ("茶杯", "cup"),
+            ("花瓶", "vase"),
+            ("瓶子", "bottle"),
+            ("可乐", "bottle"),
+            ("书", "book"),
+            ("手机", "cell phone"),
+            ("杯", "cup"),
+        ):
             if w in t:
-                label = {"椅子": "chair", "杯": "cup", "瓶子": "bottle", "书": "book", "手机": "cell phone"}.get(
-                    w, "object"
-                )
+                label = en
                 break
         return {
             "version": 1,
@@ -80,6 +203,25 @@ def _offline_plan(user_text: str) -> dict[str, Any]:
             "rationale_zh": "离线规则：取物语义",
             "confidence": 0.55,
         }
+    if any(k in t for k in ("转", "转身", "旋转", "面向")):
+        mag = _parse_turn_magnitude_deg(t)
+        sign_hint = _turn_direction_sign(t)
+        delta = float(sign_hint) * mag if sign_hint is not None else mag
+        return _fix_turn_intent(
+            {
+                "version": 1,
+                "command": "navigate_to_pose",
+                "args": {
+                    "frame_id": "map",
+                    "yaw_only": True,
+                    "relative_yaw_deg": delta,
+                    "user_request_zh": t,
+                },
+                "rationale_zh": "离线规则：原地相对转向（左正右负）",
+                "confidence": 0.6,
+            },
+            t,
+        )
     if any(k in t for k in ("去", "到", "导航", "走过去")):
         return {
             "version": 1,
@@ -134,7 +276,7 @@ class LlmRouterNode(Node):
         self.declare_parameter("llm_api_key_env", "TJ_LLM_API_KEY")
         self.declare_parameter("llm_model", "gpt-4o-mini")
         self.declare_parameter("llm_timeout_sec", 60.0)
-        self.declare_parameter("publish_task_goal_from_fetch", True)
+        self.declare_parameter("publish_task_goal_from_fetch", False)
 
         speech_topic = str(self.get_parameter("speech_text_topic").value)
         parsed_topic = str(self.get_parameter("parsed_intent_topic").value)
@@ -184,6 +326,7 @@ class LlmRouterNode(Node):
         if obj is None:
             obj = _offline_plan(text)
         obj = _validate_cmd(obj)
+        obj = _fix_turn_intent(obj, text)
         payload = json.dumps(obj, ensure_ascii=False)
         self._pub_intent.publish(String(data=payload))
         self.get_logger().info(f"[llm_router] parsed_intent: {payload}")
@@ -196,6 +339,24 @@ class LlmRouterNode(Node):
 
     def _call_openai_compatible(self, user_text: str, api_key: str) -> dict[str, Any] | None:
         url = _resolve_chat_completions_url(self._llm_url)
+        key_clean, key_err = _api_key_for_bearer_header(api_key)
+        if key_err == "empty":
+            self.get_logger().error("[llm_router] TJ_LLM_API_KEY 为空，跳过 HTTP 调用。")
+            return None
+        if key_err == "stripped_non_ascii":
+            self.get_logger().warning(
+                "[llm_router] TJ_LLM_API_KEY 内混有非 ASCII 字符（全角/特殊字母/不可见字符），已自动剥除后使用；"
+                "请检查 local_llm.env 是否在编辑器里被误插入 Unicode。"
+            )
+        elif key_err is not None:
+            self.get_logger().error(
+                "[llm_router] TJ_LLM_API_KEY 无法用于 HTTP Authorization（须为 Latin-1 可编码，一般为纯 ASCII）。"
+                f"诊断: {key_err}。请检查环境变量 {self._key_env!r} 是否与 local_llm.env 一致、文件是否为 UTF-8 无 BOM、"
+                "以及是否在系统/IDE 里另设了同名变量覆盖了正确 Key。"
+            )
+            return None
+
+        auth_header = f"Bearer {key_clean}"
 
         body = {
             "model": self._model,
@@ -211,7 +372,7 @@ class LlmRouterNode(Node):
             data=data,
             headers={
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
+                "Authorization": auth_header,
             },
             method="POST",
         )

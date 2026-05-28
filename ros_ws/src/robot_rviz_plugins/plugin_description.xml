@@ -1,0 +1,8 @@
+<library path="robot_rviz_plugins">
+  <class
+    name="robot_rviz_plugins/SimSpeech"
+    type="robot_rviz_plugins::SimSpeechPanel"
+    base_class_type="rviz_common::Panel">
+    <description>模拟语音输入：预设句子发布到 /interaction/speech_text，供 LLM 路由。</description>
+  </class>
+</library>

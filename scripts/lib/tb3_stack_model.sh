@@ -80,73 +80,20 @@ prepare_model_with_camera_rate() {
   local camera_rate="$3"
   local enable_camera="$4"
   local camera_always_on="$5"
-
-  if ! python3 - "${input_file}" "${output_file}" "${camera_rate}" "${enable_camera}" "${camera_always_on}" <<'PY'
-import re
-import sys
-from pathlib import Path
-
-input_file = Path(sys.argv[1])
-output_file = Path(sys.argv[2])
-rate = sys.argv[3].strip()
-enable_camera = sys.argv[4].strip() == "1"
-camera_always_on = sys.argv[5].strip() == "1"
-
-text = input_file.read_text(encoding="utf-8", errors="ignore")
-
-sensor_pattern = re.compile(
-    r"(<sensor\b[^>]*\btype=['\"]camera['\"][^>]*>)(.*?)(</sensor>)",
-    flags=re.S,
-)
-
-def patch_one_sensor(match: re.Match) -> str:
-    head, body, tail = match.groups()
-    patched = body
-    target_always_on = "true" if (enable_camera and camera_always_on) else "false"
-    target_rate = rate if enable_camera else "0"
-
-    if re.search(r"<always_on>.*?</always_on>", patched, flags=re.S):
-        patched = re.sub(
-            r"<always_on>.*?</always_on>",
-            f"<always_on>{target_always_on}</always_on>",
-            patched,
-            count=1,
-            flags=re.S,
-        )
-    else:
-        patched = f"\n        <always_on>{target_always_on}</always_on>" + patched
-
-    if re.search(r"<update_rate>.*?</update_rate>", patched, flags=re.S):
-        patched = re.sub(
-            r"<update_rate>.*?</update_rate>",
-            f"<update_rate>{target_rate}</update_rate>",
-            patched,
-            count=1,
-            flags=re.S,
-        )
-    else:
-        patched = f"\n        <update_rate>{target_rate}</update_rate>" + patched
-
-    if not enable_camera:
-        if re.search(r"<visualize>.*?</visualize>", patched, flags=re.S):
-            patched = re.sub(
-                r"<visualize>.*?</visualize>",
-                "<visualize>false</visualize>",
-                patched,
-                count=1,
-                flags=re.S,
-            )
-        else:
-            patched = f"\n        <visualize>false</visualize>" + patched
-
-    return head + patched + tail
-
-new_text, count = sensor_pattern.subn(patch_one_sensor, text)
-output_file.write_text(new_text, encoding="utf-8")
-print(f"UPDATED_CAMERA_SENSORS={count}")
-PY
-  then
-    echo "WARNING: 生成低帧率模型失败，回退原始 MODEL_FILE=${input_file}" >&2
+  local patch_py="${SCRIPT_DIR}/../ros_ws/src/robot_bringup/scripts/patch_tb3_gazebo_camera_sensors.py"
+  if [[ ! -f "${patch_py}" ]]; then
+    echo "WARNING: missing ${patch_py}" >&2
     return 1
   fi
+  python3 "${patch_py}" \
+    --input "${input_file}" \
+    --output "${output_file}" \
+    --rate "${camera_rate}" \
+    --enable "${enable_camera}" \
+    --always-on "${camera_always_on}" \
+    --rgb-width "${TB3_SIM_CAMERA_WIDTH:-640}" \
+    --rgb-height "${TB3_SIM_CAMERA_HEIGHT:-480}" \
+    --depth-width "${TB3_SIM_DEPTH_WIDTH:-640}" \
+    --depth-height "${TB3_SIM_DEPTH_HEIGHT:-480}" \
+    --kinds camera
 }

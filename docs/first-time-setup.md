@@ -70,16 +70,107 @@ pip install -r ros_ws/src/robot_interaction/requirements-voice.txt
 sudo apt-get update && sudo apt-get install -y portaudio19-dev
 ```
 
-节点默认 Whisper 规模为 **base**（参数 `whisper_model_size`）。首次运行前建议预拉取权重；**国内镜像一行示例**（与常见 GPU + int8 用法一致，可按机器改为 `cpu` + `float32`）：
+节点默认 **`whisper_device=auto`**（有 NVIDIA 则用 **cuda**）、**`whisper_compute_type=int8`**，与 `voice_gateway` 一致。首次运行前建议预拉取并热身：
 
 ```bash
-python3 scripts/prep_faster_whisper.py --hf-endpoint https://hf-mirror.com --size base --device cuda --compute-type int8
+python3 scripts/prep_faster_whisper.py --hf-endpoint https://hf-mirror.com
+# 默认即 --device auto --compute-type int8；无 GPU 时会自动 cpu+float32
 ```
 
 在项目根目录执行；更多说明见 `scripts/prep_faster_whisper.py` 顶部文档字符串。
 
+### WSL 麦克风（`whisper_mic`）
+
+WSL **没有**独立声卡，要靠 **WSLg** 把 Windows 麦克风经 PulseAudio 转给 Linux。新开终端若未设置 `PULSE_SERVER`，`sounddevice` 常会报「未枚举到任何输入设备」——**不是**每次都要手打一长串命令，建议 **一次性** 写入 `~/.bashrc`：
+
+```bash
+# TJ-Robot WSL 麦克风（按实际路径保留其一即可）
+[ -e /mnt/wslg/runtime-dir/pulse/native ] && export PULSE_SERVER=unix:/mnt/wslg/runtime-dir/pulse/native
+```
+
+`bash scripts/run_full_system.sh` 会自动 `source scripts/lib/wsl_pulse_env.sh` 尝试设置；启动前可自检：
+
+```bash
+bash scripts/check_mic_devices.sh
+```
+
+仍无设备时请检查：Windows **设置 → 隐私 → 麦克风** 已允许「适用于 Linux 的 Windows 子系统」；WSL 为 **WSL2 + 带 GUI**（WSLg）；不要用纯 SSH 进 WSL 跑语音。
+
+### WSL 麦克风 / Pulse 僵死（`import sounddevice` 卡住、`Pa_Initialize` 无返回）
+
+WSLg 把 Windows 麦克风经 **PulseAudio** 转给 Linux；该服务在 **整个 WSL 会话** 里只有一份。若 `voice_gateway` 被强杀、或只执行 `tb3_stack stop` 而未停语音，Pulse 可能进入僵死状态：此时在 WSL 里 `python3 -c "import sounddevice"` 会一直卡住，`pkill` / `unset PULSE_SERVER` **也无效**。
+
+**可靠恢复**（与「关闭所有 WSL 窗口并重启 Cursor」相同）：
+
+```powershell
+# Windows PowerShell（管理员更稳妥）
+wsl --shutdown
+```
+
+然后重新打开 Cursor / WSL，再执行：
+
+```bash
+bash scripts/check_mic_devices.sh
+```
+
+**预防：**
+
+```bash
+bash scripts/kill_simulation_stack.sh   # 含语音栈 + 仿真，不要只 tb3_stack stop
+```
+
+诊断脚本（会明确提示是否需要 `wsl --shutdown`）：
+
+```bash
+bash scripts/recover_wsl_audio.sh
+```
+
+### 复现「先 voice 再 base → 过一会不收音」并抓故障时刻
+
+1. `colcon build --packages-select robot_interaction robot_bringup`
+2. 三个终端：
+
+```bash
+# 终端 1
+bash scripts/run_voice_stack.sh
+
+# 终端 2（等 voice 里出现「已打开输入」「模型就绪」后）
+bash scripts/run_full_system_base.sh
+
+# 终端 3
+bash scripts/watch_voice_health.sh
+```
+
+3. 对着麦说话；当不再切段时查看：
+   - `data/logs/full_system/voice_gateway_health.jsonl`（每 5s 一行，`read_stall_sec` 持续增大 → `stream.read` 卡死）
+   - `data/logs/full_system/voice_health_incidents/incident_*.txt`（自动快照：gz/yolo/GPU/进程）
+   - `data/logs/full_system/voice_health_watch.log`（`state=mic_stall` 或 `pulse_dead` 的时刻 ≈ base 起后多久）
+
+**不要**在 voice 运行时另开终端 `python3 -c "import sounddevice"`，会干扰 WSL Pulse。
+
+环境噪导致频繁误「切段」时，可提高 RMS 门限（默认已由 0.01 调到 **0.02**，最短有效语音 **0.38s**）：
+
+```bash
+export TJ_MIC_SPEECH_RMS_THRESHOLD=0.03   # 仍敏感可试 0.035~0.04
+bash scripts/run_voice_stack.sh
+# 或 launch 参数: mic_speech_rms_threshold:=0.03 mic_debug_rms:=true  # 后者可在 log 里看实时 rms
+```
+
+**无麦克风联调全链路**（默认已开启，RViz 模拟语音）：
+
+```bash
+bash scripts/run_full_system.sh
+# RViz 面板 Sim Speech → 发送 → LLM
+```
+
+旧 mock 定时语句：`export TJ_SIM_SPEECH_UI=0 TJ_FULL_SYSTEM_ASR=mock` 后 `enable_mock_voice:=true`。
+
+或对已有 wav：`asr_backend:=whisper_file`，向 `/interaction/transcribe_wav_path` 发绝对路径。
+
 ### 全链路 `scripts/run_full_system.sh` 约定
 
+- **相机 / YOLO 话题**：与 `run_simulation.sh` 相同，由 `scripts/lib/tb3_sim_assist_env.sh` 导出；一体 RGB-D 默认 `YOLO_IMAGE_TOPIC=/camera/image_raw`（非 `/camera/rgb/*`），深度 `/camera/depth/image_raw`。
+- **全屋巡检**：语音 `start_room_patrol` → `/task/events` 的 `patrol_start` → **`patrol_waypoints`（NavigationManager）**：地图覆盖航点、卡死脱困、失败走廊黑名单（与 `run_nav2.sh` 同源，非旧 `patrol_smallhouse`）。
 - **RViz**：与仿真栈共用 `ros_ws/src/robot_bringup/config/test1.rviz`（含 YOLO 图像/目标点/Marker 等），并在其中合并 **Nav2 的 `GoalTool`（2D Nav Goal）** 与 **「Navigation 2」** 侧栏，便于发 `NavigateToPose`，无需再切换到 `nav2_default_view.rviz`。
 - **语音识别**：若启动参数里未写 `asr_backend:=...`，脚本会注入 `asr_backend:=${TJ_FULL_SYSTEM_ASR:-whisper_mic}`（默认麦克风）。无麦克风或不想装依赖时，可 `export TJ_FULL_SYSTEM_ASR=mock` 并传入 `enable_mock_voice:=true`，或自行传 `asr_backend:=whisper_file`。
 

@@ -2,7 +2,7 @@
 
 ## 1. 包定位
 
-`human_yolo_seg` 是视觉感知包，基于 YOLO 做**多类物体**检测、3D 定位与地图可视化（默认 COCO：人 + 椅子，可配）。  
+`human_yolo_seg` 是视觉感知包，基于 YOLO 做**多类物体**检测、3D 定位与地图可视化（默认 COCO：瓶/杯/花瓶，可配）。  
 当前主要服务于 RGBD 场景下的视觉感知验证。
 
 ## 2. 主要职责
@@ -23,7 +23,7 @@ pip install -r requirements.txt
 ```
 
 模型权重默认放置在 `models/` 目录，默认文件名为 `yolo26n-seg.pt`。  
-launch 默认 `target_class_ids_csv:=0,56`（COCO 类别 0 与 56，常见作人/椅等语义）；`target_class_ids_csv:=all` 为全 COCO（更重）。脚本 `tb3_stack.sh` 可通过 **`YOLO_TARGET_CLASS_IDS`** 传入逗号列表。
+launch 默认 `target_class_ids_csv:=39,41,75`（瓶/杯/花瓶；仿真可乐罐多标为 bottle 或 cup）。`all` 为全 COCO（更重）。脚本 `tb3_stack.sh` 可通过 **`YOLO_TARGET_CLASS_IDS`** 覆盖。
 
 ## 4. 目录说明
 
@@ -56,6 +56,8 @@ human_yolo_seg/
 
 ```bash
 ros2 launch human_yolo_seg yolo_object_seg.launch.py
+# 推荐（仿真双相机）：注册深度到 RGB 后再做 3D
+ros2 launch human_yolo_seg yolo_object_seg.launch.py enable_depth_register:=true
 # 等价（旧文件名）：
 ros2 launch human_yolo_seg yolo_person_seg.launch.py
 ```
@@ -64,15 +66,21 @@ ros2 launch human_yolo_seg yolo_person_seg.launch.py
 
 - `/yolo_objects/target_objects_marker`（`visualization_msgs/MarkerArray`）：地图上**多目标**球体与文字标签
 - `/yolo_objects/target_point_camera` (`geometry_msgs/PointStamped`)
-- `/yolo_objects/target_point_map` (`geometry_msgs/PointStamped`，主目标单点）
+- `/yolo_objects/target_point_map` (`geometry_msgs/PointStamped`，主目标单点)
+- `/yolo_objects/target_map_valid` (`std_msgs/Bool`)：当前是否有有效主目标；无目标时为 `false`（避免 RViz 绿点/旧坐标残留）
 - `/yolo_objects/target_label` (`std_msgs/String`)
+- `/yolo_objects/desired_object_label` (`std_msgs/String`)：语音/任务语义（如 `cup`、`杯子`）。由 `command_executor` 在 `fetch_object` 时写入、`stop` 时清空；YOLO 仅在对应 COCO 类 track 中选**视野最近**目标作为绿点。
 - `/yolo_objects/detection_*`：`detection_count`、`detection_max_conf`、`detection_present`
 常用参数（3D 坐标转换）：
 
-- `depth_topic`：深度图话题（默认 `/camera/depth/image_raw`）
+- `depth_topic`：深度图（仿真默认 `/tb3_depth_only/depth/image_raw`）
+- `use_depth_sync`：是否用 `message_filters` 同步 RGB+Depth（默认 `true`，对齐 yolo_ros）
+- `depth_sample_stat`：ROI 深度统计 `median`（默认）| `trimmed_mean` | `min`
+- `depth_pixels_aligned`：深度已与 RGB 配准时设 `true`（如 `enable_depth_register:=true`）
+- `enable_depth_register`：启动 `depth_image_proc/register` 并自动切换注册深度话题
 - `target_frame_id`：目标发布坐标系（默认 `map`）
 - `depth_unit_divisor`：16UC1 深度换算系数（毫米相机常用 `1000.0`）
-- `max_depth_age_sec`：RGB 与深度时间同步阈值
+- `max_depth_age_sec`：仅 `use_depth_sync:=false` 时生效
 - `enable_target_tracking`：是否开启目标关联追踪
 - `target_class_ids_csv` / `target_class_ids`：类别过滤（csv 非空时优先）
 - `publish_target_markers`：是否发布地图多目标 MarkerArray

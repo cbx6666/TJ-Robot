@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Event-driven Nav2 waypoint patrol executor for the indoor map."""
+"""[已弃用] 旧版固定航点巡检。全链路请用 robot_navigation/patrol_waypoints + NavigationManager。"""
 
 import json
 import math

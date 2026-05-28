@@ -19,7 +19,14 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
-        ("share/" + package_name + "/launch", ["launch/yolo_object_seg.launch.py", "launch/yolo_person_seg.launch.py"]),
+        (
+            "share/" + package_name + "/launch",
+            [
+                "launch/yolo_object_seg.launch.py",
+                "launch/yolo_person_seg.launch.py",
+                "launch/yolo_depth_register.launch.py",
+            ],
+        ),
         ("share/" + package_name, ["requirements.txt"]),
         ("share/" + package_name + "/models", _model_install),
     ],

@@ -6,5 +6,9 @@ yolo:
   annotated_topic: /yolo_objects/annotated_image
   conf_threshold: 0.25
   imgsz: 640
+  # 与 tb3_stack YOLO_TARGET_CLASS_IDS 一致（COCO id）
+  target_class_ids_csv: "39,41,75"
   target_class_ids:
-    person: 0
+    bottle: 39
+    cup: 41
+    vase: 75

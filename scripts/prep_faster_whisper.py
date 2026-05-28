@@ -17,7 +17,7 @@ WSL 若报 Network unreachable，可任选其一：
 说明: Hub 上只有一套 CTranslate2 权重（如 Systran/faster-whisper-base），与 int8/float32 或 cpu/cuda 无关；
 若节点用 cuda+int8，建议用相同参数 prep 一次，便于区分「下载慢」与「GPU 初始化卡住」（WSL 常见后者）。
 
-用法:
+用法（默认与 voice_gateway 一致：whisper_device=auto → 有 CUDA 则用 cuda，whisper_compute_type=int8）:
   python3 scripts/prep_faster_whisper.py
   python3 scripts/prep_faster_whisper.py --size base --device cuda --compute-type int8
   python3 scripts/prep_faster_whisper.py --hf-endpoint https://hf-mirror.com
@@ -31,6 +31,26 @@ import os
 import sys
 import time
 from pathlib import Path
+
+
+def _resolve_device_compute(device: str, compute_type: str) -> tuple[str, str]:
+    """与 voice_gateway_node._ensure_whisper 相同的 device/compute 解析（不含 mic_force_cpu_on_wsl）。"""
+    dev = (device or "auto").strip().lower()
+    ctype = (compute_type or "int8").strip()
+    if dev == "auto":
+        try:
+            import torch
+
+            dev = "cuda" if torch.cuda.is_available() else "cpu"
+        except ImportError:
+            dev = "cpu"
+    if dev == "cpu" and ctype.lower() in ("int8", "int8_float32", "int8_bfloat16"):
+        print(
+            "[prep] device=cpu：compute_type 自动改为 float32（与 voice_gateway 一致，避免 WhisperModel 卡死）",
+            flush=True,
+        )
+        ctype = "float32"
+    return dev, ctype
 
 
 def _hub_repo_for_size(size: str) -> str:
@@ -75,11 +95,15 @@ def _print_network_help(size: str) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--size", default="base", help="Hub 上的名字，如 tiny/base/small；或配合 --local-model 可忽略")
-    ap.add_argument("--device", default="cpu", help="cpu 或 cuda")
+    ap.add_argument(
+        "--device",
+        default="auto",
+        help="auto（有 CUDA 用 cuda，否则 cpu）| cuda | cpu；与 voice_gateway whisper_device 一致",
+    )
     ap.add_argument(
         "--compute-type",
-        default="float32",
-        help="WSL+CPU 建议 float32；GPU 常用 int8",
+        default="int8",
+        help="与 voice_gateway whisper_compute_type 一致；仅 cpu 时会自动降为 float32",
     )
     ap.add_argument(
         "--download-root",
@@ -124,6 +148,7 @@ def main() -> int:
 
     dr = (args.download_root or "").strip()
     lm = (args.local_model or "").strip()
+    dev, ctype = _resolve_device_compute(args.device, args.compute_type)
 
     try:
         from faster_whisper import WhisperModel
@@ -140,7 +165,7 @@ def main() -> int:
         print(f"[prep] 从本地目录加载（不经网络）: {p}", flush=True)
         t0 = time.monotonic()
         try:
-            WhisperModel(str(p), device=args.device, compute_type=args.compute_type)
+            WhisperModel(str(p), device=dev, compute_type=ctype)
         except Exception as e:
             print(f"[prep] 失败: {e}", file=sys.stderr, flush=True)
             return 1
@@ -148,7 +173,7 @@ def main() -> int:
         return 0
 
     print(
-        f"[prep] 开始从 Hub 拉取: size={args.size!r} device={args.device!r} compute_type={args.compute_type!r}"
+        f"[prep] 开始从 Hub 拉取: size={args.size!r} device={dev!r} compute_type={ctype!r}"
         + (f" download_root={dr!r}" if dr else ""),
         flush=True,
     )
@@ -156,11 +181,11 @@ def main() -> int:
     try:
         if dr:
             try:
-                WhisperModel(args.size, device=args.device, compute_type=args.compute_type, download_root=dr)
+                WhisperModel(args.size, device=dev, compute_type=ctype, download_root=dr)
             except TypeError:
-                WhisperModel(args.size, device=args.device, compute_type=args.compute_type)
+                WhisperModel(args.size, device=dev, compute_type=ctype)
         else:
-            WhisperModel(args.size, device=args.device, compute_type=args.compute_type)
+            WhisperModel(args.size, device=dev, compute_type=ctype)
     except Exception as e:
         print(f"[prep] 失败: {e}", file=sys.stderr, flush=True)
         _print_network_help(args.size)

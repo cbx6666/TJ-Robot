@@ -1,19 +1,74 @@
 from __future__ import annotations
 
+import json
 import os
 import queue
 import re
+import shutil
+import subprocess
 import sys
 import threading
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
+
+
+def _is_wsl() -> bool:
+    try:
+        with open("/proc/version", encoding="utf-8") as vf:
+            return "microsoft" in vf.read().lower()
+    except OSError:
+        return False
+
+
+def _wsl_pulse_socket_candidates() -> list[str]:
+    cands = [
+        "/mnt/wslg/runtime-dir/pulse/native",
+        "/mnt/wslg/PulseServer",
+        "/mnt/wslg/pulse/native",
+    ]
+    xdg = os.environ.get("XDG_RUNTIME_DIR", "").strip()
+    if xdg:
+        cands.append(os.path.join(xdg, "pulse", "native"))
+    return [p for p in cands if os.path.exists(p)]
+
+
+def _pulse_server_alive() -> bool:
+    if not os.environ.get("PULSE_SERVER"):
+        return False
+    import subprocess
+
+    try:
+        subprocess.run(
+            ["pactl", "info"],
+            capture_output=True,
+            timeout=4,
+            check=True,
+        )
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _apply_wsl_pulse_env() -> str | None:
+    """WSLg：设置可用的 PULSE_SERVER；套接字存在但 Pulse 未响应时不强绑（避免枚举为空）。"""
+    if not _is_wsl():
+        return os.environ.get("PULSE_SERVER")
+    for cand in _wsl_pulse_socket_candidates():
+        os.environ["PULSE_SERVER"] = f"unix:{cand}"
+        if _pulse_server_alive():
+            return os.environ["PULSE_SERVER"]
+    cur = os.environ.get("PULSE_SERVER", "").strip()
+    if cur and _pulse_server_alive():
+        return cur
+    os.environ.pop("PULSE_SERVER", None)
+    return None
 
 
 def _resolve_existing_wav_path(raw: str) -> Path | None:
@@ -39,7 +94,7 @@ class VoiceGatewayNode(Node):
     - mock：定时发布测试句（默认关闭；联调可开 enable_mock_input）。
     - whisper_file：订阅 ``transcribe_wav_path_topic``，对 16kHz+ 单声道 wav 路径做转写。
     - whisper_mic：本机默认麦克风 16kHz 单声道流式采集，静音切段后转写（需 sounddevice + faster-whisper）。
-    - 简体倾向：参数 ``whisper_initial_prompt`` 默认简体提示语，传给 Whisper ``initial_prompt``（与 ``mic_whisper_language:=zh`` 配合）。
+    - 中文：``mic_whisper_language:=zh``；可选 ``whisper_initial_prompt``（默认空，避免静音时幻听提示语）。
     - voice_api：若 ``voice_api_url`` 非空，当前仅占位日志（可自行接云 ASR）。
     """
 
@@ -58,16 +113,13 @@ class VoiceGatewayNode(Node):
         self.declare_parameter("whisper_device", "auto")
         self.declare_parameter("whisper_compute_type", "int8")
         self.declare_parameter("whisper_download_root", "")
-        self.declare_parameter(
-            "whisper_initial_prompt",
-            "请用简体中文输出，勿用繁体。",
-        )
+        self.declare_parameter("whisper_initial_prompt", "")
         self.declare_parameter("mic_sample_rate", 16000)
         self.declare_parameter("mic_device_index", -1)
         self.declare_parameter("mic_device_name", "")
-        self.declare_parameter("mic_speech_rms_threshold", 0.01)
+        self.declare_parameter("mic_speech_rms_threshold", 0.02)
         self.declare_parameter("mic_silence_sec", 0.65)
-        self.declare_parameter("mic_min_speech_sec", 0.28)
+        self.declare_parameter("mic_min_speech_sec", 0.38)
         self.declare_parameter("mic_block_ms", 32)
         self.declare_parameter(
             "mic_debug_rms",
@@ -78,7 +130,12 @@ class VoiceGatewayNode(Node):
         self.declare_parameter("mic_input_gain", 5.0)
         self.declare_parameter("mic_whisper_no_speech_threshold", 0.42)
         self.declare_parameter("mic_preload_whisper", False)
+        self.declare_parameter("whisper_preload_at_startup", True)
+        self.declare_parameter("mic_open_retry_sec", 120.0)
         self.declare_parameter("mic_force_cpu_on_wsl", False)
+        self.declare_parameter("mic_health_log_path", "")
+        self.declare_parameter("mic_health_interval_sec", 5.0)
+        self.declare_parameter("mic_stall_alert_sec", 4.0)
 
         self._output_topic = str(self.get_parameter("output_topic").value)
         self._speech_log_path = str(self.get_parameter("speech_text_log_path").value).strip()
@@ -94,6 +151,26 @@ class VoiceGatewayNode(Node):
         self._mic_stop: threading.Event | None = None
         self._mic_thread: threading.Thread | None = None
         self._mic_tx_thread: threading.Thread | None = None
+        self._mic_stream: Any = None
+        self._mic_stream_lock = threading.Lock()
+        self._mic_health_lock = threading.Lock()
+        self._mic_last_read_mono = 0.0
+        self._mic_last_rms = 0.0
+        self._mic_peak_rms = 0.0
+        self._mic_read_count = 0
+        self._mic_overflow_count = 0
+        self._mic_segment_count = 0
+        self._mic_stream_open = False
+        self._mic_thread_alive = False
+        self._mic_stall_incident_sent = False
+        self._mic_health_watchdog_thread: threading.Thread | None = None
+        self._mic_health_log_path = str(self.get_parameter("mic_health_log_path").value).strip()
+        if not self._mic_health_log_path:
+            self._mic_health_log_path = os.environ.get("TJ_VOICE_HEALTH_LOG", "").strip()
+        self._mic_health_interval_sec = max(
+            float(self.get_parameter("mic_health_interval_sec").value), 2.0
+        )
+        self._mic_stall_alert_sec = max(float(self.get_parameter("mic_stall_alert_sec").value), 1.5)
         self._mic_segment_q: queue.Queue[tuple[Any, float]] | None = None
         self._mic_result_q: queue.Queue[tuple[str, str]] = queue.Queue()
         self._mic_sr = int(self.get_parameter("mic_sample_rate").value) or 16000
@@ -117,6 +194,8 @@ class VoiceGatewayNode(Node):
         self._mic_input_gain = max(float(self.get_parameter("mic_input_gain").value), 0.1)
         self._mic_no_speech_thr = float(self.get_parameter("mic_whisper_no_speech_threshold").value)
         self._mic_preload_whisper = bool(self.get_parameter("mic_preload_whisper").value)
+        self._whisper_preload_at_startup = bool(self.get_parameter("whisper_preload_at_startup").value)
+        self._mic_open_retry_sec = max(float(self.get_parameter("mic_open_retry_sec").value), 10.0)
         self._mic_force_cpu_on_wsl = bool(self.get_parameter("mic_force_cpu_on_wsl").value)
         self._mic_dbg_last_log = 0.0
         self._whisper_download_root = str(self.get_parameter("whisper_download_root").value).strip()
@@ -136,21 +215,60 @@ class VoiceGatewayNode(Node):
                 f"(需 pip install faster-whisper，见 requirements-voice.txt)"
             )
         elif self._asr_backend == "whisper_mic":
+            self.get_logger().info(
+                f"[voice_gateway] ASR=whisper_mic，本机麦克风实时转写 -> {self._output_topic} "
+                f"(说完停顿约 {self._mic_silence_sec}s 触发识别；device={self._mic_device!r} "
+                f"index={idx} name={name!r}，未指定时自动选 Pulse/默认输入；"
+                f"rms>={self._mic_rms_thresh})"
+            )
             self._mic_stop = threading.Event()
             self._mic_segment_q = queue.Queue(maxsize=6)
+            # 与单独 interaction 一致：先开麦/入队，Whisper 可后台加载；切段在模型未就绪时会等 _ensure_whisper
             self._mic_tx_thread = threading.Thread(
                 target=self._mic_transcribe_worker_loop, daemon=True, name="whisper-mic-tx"
             )
             self._mic_tx_thread.start()
-            self._mic_thread = threading.Thread(target=self._mic_whisper_loop, daemon=True)
-            self._mic_thread.start()
-            self.create_timer(0.05, self._flush_mic_transcript_queue)
-            self.get_logger().info(
-                f"[voice_gateway] ASR=whisper_mic，麦克风实时转写 -> {self._output_topic} "
-                f"(需 pip install -r requirements-voice.txt；device={self._mic_device!r} "
-                f"index={idx} name={name!r} "
-                f"rms>={self._mic_rms_thresh} 静音>{self._mic_silence_sec}s 切段)"
+            self._mic_thread = threading.Thread(
+                target=self._mic_whisper_loop, daemon=True, name="whisper-mic-capture"
             )
+            self._mic_thread.start()
+            self._mic_health_watchdog_thread = threading.Thread(
+                target=self._mic_health_watchdog_loop,
+                daemon=True,
+                name="whisper-mic-health",
+            )
+            self._mic_health_watchdog_thread.start()
+            if self._mic_health_log_path:
+                self.get_logger().info(
+                    f"[voice_gateway] 健康诊断 JSONL: {self._mic_health_log_path} "
+                    f"(间隔 {self._mic_health_interval_sec}s；read 停滞 >{self._mic_stall_alert_sec}s 写 incident)"
+                )
+            self.create_timer(0.05, self._flush_mic_transcript_queue)
+            if self._whisper_preload_at_startup:
+
+                def _bg_preload_whisper() -> None:
+                    try:
+                        self._ensure_whisper()
+                    except Exception as ex:
+                        self.get_logger().error(
+                            f"[voice_gateway] 后台预加载 Whisper 异常: {ex}\n{traceback.format_exc()}"
+                        )
+
+                self.get_logger().info(
+                    "[voice_gateway] 麦克风与转写 worker 已启动；Whisper 在后台加载"
+                    "（模型未就绪时切段会先入队，就绪后再转写，与单独 launch 行为一致）…"
+                )
+                threading.Thread(target=_bg_preload_whisper, daemon=True, name="whisper-preload").start()
+            else:
+                self.get_logger().info(
+                    "[voice_gateway] whisper_preload_at_startup:=false：首段语音触发加载 Whisper，"
+                    "此前切段将阻塞在转写 worker 直至模型就绪"
+                )
+        elif self._asr_backend == "whisper_file" and self._whisper_preload_at_startup:
+            self.get_logger().info(
+                "[voice_gateway] 主线程预加载 Whisper（whisper_file）…"
+            )
+            self._ensure_whisper()
         elif self._asr_backend == "voice_api" and self._api_url:
             self.get_logger().warning("[voice_gateway] asr_backend=voice_api 尚未接具体协议，请扩展实现")
         elif self._asr_backend not in ("mock", "whisper_file", "whisper_mic", "voice_api", "none"):
@@ -176,15 +294,182 @@ class VoiceGatewayNode(Node):
                 f" 或 asr_backend=whisper_mic（本机麦克风）。"
             )
 
+    @staticmethod
+    def _utc_iso() -> str:
+        return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+    def _probe_pulse_ok(self) -> bool | None:
+        if not os.environ.get("PULSE_SERVER"):
+            return None
+        try:
+            subprocess.run(
+                ["pactl", "info"],
+                capture_output=True,
+                timeout=2,
+                check=True,
+            )
+            return True
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    def _mic_note_read(self, rms: float) -> None:
+        with self._mic_health_lock:
+            self._mic_last_read_mono = time.monotonic()
+            self._mic_last_rms = rms
+            self._mic_peak_rms = max(self._mic_peak_rms, rms)
+            self._mic_read_count += 1
+
+    def _mic_note_overflow(self) -> None:
+        with self._mic_health_lock:
+            self._mic_overflow_count += 1
+
+    def _mic_note_segment(self) -> None:
+        with self._mic_health_lock:
+            self._mic_segment_count += 1
+
+    def _mic_set_stream_open(self, open_: bool) -> None:
+        with self._mic_health_lock:
+            self._mic_stream_open = open_
+            if open_:
+                self._mic_peak_rms = 0.0
+
+    def _mic_set_thread_alive(self, alive: bool) -> None:
+        with self._mic_health_lock:
+            self._mic_thread_alive = alive
+
+    def _collect_mic_health_snapshot(self, *, event: str = "periodic") -> dict[str, Any]:
+        now = time.monotonic()
+        with self._mic_health_lock:
+            last_read = self._mic_last_read_mono
+            snap = {
+                "ts": self._utc_iso(),
+                "event": event,
+                "stream_open": self._mic_stream_open,
+                "mic_thread_alive": self._mic_thread_alive,
+                "read_count": self._mic_read_count,
+                "overflow_count": self._mic_overflow_count,
+                "segment_count": self._mic_segment_count,
+                "last_rms": round(self._mic_last_rms, 6),
+                "peak_rms": round(self._mic_peak_rms, 6),
+                "rms_threshold": self._mic_rms_thresh,
+                "read_stall_sec": round(max(0.0, now - last_read), 3) if last_read > 0 else -1.0,
+                "pulse_server": os.environ.get("PULSE_SERVER"),
+                "pulse_ok": self._probe_pulse_ok(),
+                "whisper_ready": self._whisper_model is not None,
+                "segment_queue_size": (
+                    self._mic_segment_q.qsize() if self._mic_segment_q is not None else -1
+                ),
+            }
+        return snap
+
+    def _append_mic_health_jsonl(self, snap: dict[str, Any]) -> None:
+        if not self._mic_health_log_path:
+            return
+        path = Path(self._mic_health_log_path)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(snap, ensure_ascii=False) + "\n")
+        except OSError as ex:
+            self.get_logger().warning(f"[voice_health] 无法写入 {path}: {ex}")
+
+    def _dump_mic_incident(self, snap: dict[str, Any], reason: str) -> None:
+        base = Path(self._mic_health_log_path).parent if self._mic_health_log_path else Path("/tmp")
+        inc_dir = base / "voice_health_incidents"
+        inc_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = inc_dir / f"incident_{stamp}.txt"
+        lines = [
+            f"===== voice mic incident {self._utc_iso()} =====",
+            f"reason: {reason}",
+            json.dumps(snap, ensure_ascii=False, indent=2),
+            "",
+            "===== pgrep (gz / yolo / voice) =====",
+        ]
+        for pat in ("gzserver", "gzclient", "yolo_object", "voice_gateway", "whisper"):
+            try:
+                out = subprocess.run(
+                    ["pgrep", "-af", pat],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                )
+                lines.append(f"--- {pat} ---")
+                lines.append(out.stdout.strip() or "(none)")
+            except (OSError, subprocess.SubprocessError) as ex:
+                lines.append(f"--- {pat}: {ex}")
+        try:
+            out = subprocess.run(["free", "-h"], capture_output=True, text=True, timeout=2)
+            lines.extend(["", "===== free -h =====", out.stdout])
+        except (OSError, subprocess.SubprocessError):
+            pass
+        if shutil.which("nvidia-smi"):
+            try:
+                out = subprocess.run(
+                    ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total", "--format=csv,noheader"],
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
+                )
+                lines.extend(["", "===== nvidia-smi =====", out.stdout])
+            except (OSError, subprocess.SubprocessError):
+                pass
+        try:
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            self.get_logger().error(f"[voice_health] 已写入故障快照: {path}")
+        except OSError as ex:
+            self.get_logger().error(f"[voice_health] 无法写入快照 {path}: {ex}")
+
+    def _mic_health_watchdog_loop(self) -> None:
+        while self._mic_stop is not None and not self._mic_stop.is_set():
+            time.sleep(self._mic_health_interval_sec)
+            snap = self._collect_mic_health_snapshot(event="periodic")
+            self._append_mic_health_jsonl(snap)
+            stall = float(snap.get("read_stall_sec", -1))
+            if (
+                snap.get("stream_open")
+                and snap.get("mic_thread_alive")
+                and stall >= self._mic_stall_alert_sec
+            ):
+                if not self._mic_stall_incident_sent:
+                    self._mic_stall_incident_sent = True
+                    msg = (
+                        f"[voice_health] 麦克风 read 停滞 {stall:.1f}s（>{self._mic_stall_alert_sec}s）"
+                        f" peak_rms={snap.get('peak_rms')} thr={snap.get('rms_threshold')}"
+                        f" pulse_ok={snap.get('pulse_ok')} gz 可能已拖死 Pulse；见 incident 文件"
+                    )
+                    self.get_logger().error(msg)
+                    self._dump_mic_incident(snap, reason="mic_read_stall")
+            else:
+                self._mic_stall_incident_sent = False
+
+    def _release_mic_stream(self) -> None:
+        with self._mic_stream_lock:
+            stream = self._mic_stream
+            self._mic_stream = None
+        if stream is None:
+            return
+        for meth in ("abort", "stop", "close"):
+            try:
+                fn = getattr(stream, meth, None)
+                if callable(fn):
+                    fn()
+            except Exception:
+                pass
+
     def destroy_node(self) -> bool:
         if self._mic_stop is not None:
             self._mic_stop.set()
+        self._release_mic_stream()
         if self._mic_thread is not None:
             self._mic_thread.join(timeout=6.0)
             self._mic_thread = None
         if self._mic_tx_thread is not None:
             self._mic_tx_thread.join(timeout=120.0)
             self._mic_tx_thread = None
+        if self._mic_health_watchdog_thread is not None:
+            self._mic_health_watchdog_thread.join(timeout=3.0)
+            self._mic_health_watchdog_thread = None
         return super().destroy_node()
 
     def _flush_mic_transcript_queue(self) -> None:
@@ -196,13 +481,12 @@ class VoiceGatewayNode(Node):
             pass
 
     def _mic_transcribe_worker_loop(self) -> None:
-        """单线程串行执行 Whisper，避免多 daemon 线程争 CUDA；队列在模型加载前即开始消费。"""
+        """单线程串行执行 Whisper，避免多 daemon 线程争 CUDA；模型未就绪时段落会在取队列后等待加载。"""
         self.get_logger().info(
-            "[voice_gateway] whisper_mic 转写 worker 启动（串行），等待切段入队…"
-            "（默认不预加载模型，避免 WSL 下 CUDA 在后台线程卡死；可设 mic_preload_whisper:=true）"
+            "[voice_gateway] whisper_mic 转写 worker 启动（串行），等待麦克风切段入队…"
         )
-        if self._mic_preload_whisper:
-            self.get_logger().info("[voice_gateway] whisper_mic 预加载 Whisper（mic_preload_whisper:=true）…")
+        if self._mic_preload_whisper and self._whisper_model is None and not self._whisper_preload_at_startup:
+            self.get_logger().info("[voice_gateway] mic_preload_whisper:=true，worker 内加载 Whisper…")
             try:
                 self._ensure_whisper()
             except Exception as ex:
@@ -254,8 +538,11 @@ class VoiceGatewayNode(Node):
                 kw["initial_prompt"] = self._whisper_initial_prompt
             t0 = time.monotonic()
             with self._whisper_lock:
-                segments, _info = model.transcribe(a, **kw)
-                text = "".join(s.text for s in segments).strip()
+                segments, info = model.transcribe(a, **kw)
+                seg_list = list(segments)
+            text = self._postprocess_whisper_text(
+                "".join(s.text for s in seg_list).strip(), seg_list, info=info
+            )
             dt = time.monotonic() - t0
             if text:
                 preview = (text[:48] + "…") if len(text) > 48 else text
@@ -266,12 +553,110 @@ class VoiceGatewayNode(Node):
             else:
                 self.get_logger().info(
                     f"[voice_gateway] whisper_mic 转写完成: 无有效文本（Whisper 已跑完，用时={dt:.2f}s，字数=0）。"
-                    "可试: 说话更长更响、-p mic_input_gain:=10、-p mic_whisper_no_speech_threshold:=0.32"
+                    "可试: 说话更长更响、-p mic_input_gain:=10、-p mic_whisper_no_speech_threshold:=0.32；"
+                    "若曾设 whisper_initial_prompt 请改回空字符串"
                 )
         except Exception as ex:
             self.get_logger().error(
                 f"[voice_gateway] whisper_mic 转写失败: {ex}\n{traceback.format_exc()}"
             )
+
+    @staticmethod
+    def _mic_list_inputs(sd_mod: Any) -> list[tuple[int, str]]:
+        out: list[tuple[int, str]] = []
+        try:
+            for i, d in enumerate(sd_mod.query_devices()):
+                if int(d.get("max_input_channels", 0) or 0) > 0:
+                    out.append((i, str(d.get("name", ""))))
+        except Exception:
+            pass
+        return out
+
+    @staticmethod
+    def _mic_rank_input_indices(inputs: list[tuple[int, str]], *, wsl: bool) -> list[int]:
+        """WSL 常见 [0]=pulse、[1]=default；PortAudio 默认常为 1，但 pulse 更不易 Timeout。"""
+
+        def _prio(item: tuple[int, str]) -> tuple[int, int]:
+            i, name = item
+            n = name.lower()
+            if wsl and "pulse" in n:
+                return (0, i)
+            if wsl and n.strip() == "default":
+                return (30, i)
+            if wsl and "default" in n:
+                return (25, i)
+            return (10, i)
+
+        return [i for i, _ in sorted(inputs, key=_prio)]
+
+    def _mic_log_input_devices(self, sd_mod: Any) -> list[tuple[int, str]]:
+        inputs = self._mic_list_inputs(sd_mod)
+        if inputs:
+            self.get_logger().info(
+                "[voice_gateway] 输入设备: "
+                + "; ".join(f"[{i}] {name}" for i, name in inputs)
+            )
+        else:
+            self.get_logger().warning("[voice_gateway] 未枚举到任何输入通道>0 的音频设备。")
+        return inputs
+
+    def _mic_input_device_candidates(self, sd_mod: Any) -> list[int | str]:
+        """按优先级返回待尝试的输入设备；指定 index 不存在时回退到自动列表。"""
+        pulse = _apply_wsl_pulse_env()
+        self.get_logger().info(
+            f"[voice_gateway] 音频环境 PULSE_SERVER={os.environ.get('PULSE_SERVER', '<未设置>')}"
+            + ("（已校验可用）" if pulse else "（PortAudio 默认路由）")
+        )
+
+        wsl = _is_wsl()
+        max_attempts = 8 if wsl else 2
+        for attempt in range(max_attempts):
+            inputs = self._mic_list_inputs(sd_mod)
+            if inputs:
+                if attempt == 0:
+                    self._mic_log_input_devices(sd_mod)
+                ranked = self._mic_rank_input_indices(inputs, wsl=wsl)
+                if wsl and ranked:
+                    pa_default: int | None = None
+                    try:
+                        pair = sd_mod.default.device
+                        di = pair[0] if isinstance(pair, (list, tuple)) else pair
+                        if di is not None and int(di) >= 0:
+                            pa_default = int(di)
+                    except Exception:
+                        pa_default = None
+                    if pa_default is not None and pa_default != ranked[0]:
+                        self.get_logger().info(
+                            f"[voice_gateway] WSL 优先 pulse 设备 index={ranked[0]} "
+                            f"（PortAudio 默认输入为 index={pa_default}，full_system 下 default 易 Pulse Timeout）"
+                        )
+                preferred = self._mic_device
+                if preferred is not None:
+                    if isinstance(preferred, int):
+                        if preferred in ranked:
+                            rest = [i for i in ranked if i != preferred]
+                            return [preferred, *rest]
+                        self.get_logger().warning(
+                            f"[voice_gateway] mic_device_index={preferred} 当前不可用"
+                            f"（PortAudio 尚未枚举到该设备），改用自动列表并继续重试"
+                        )
+                    else:
+                        return [preferred, *ranked]
+                return ranked
+            if attempt == 0:
+                self._mic_log_input_devices(sd_mod)
+            had_pulse = bool(os.environ.get("PULSE_SERVER"))
+            if had_pulse and not _pulse_server_alive():
+                self.get_logger().warning(
+                    "[voice_gateway] PULSE_SERVER 已设但 pactl 无响应，清除后重试"
+                )
+                os.environ.pop("PULSE_SERVER", None)
+            elif attempt == 2 and not had_pulse:
+                _apply_wsl_pulse_env()
+            if attempt + 1 < max_attempts:
+                time.sleep(2.0)
+        self._mic_log_input_devices(sd_mod)
+        return []
 
     def _mic_whisper_loop(self) -> None:
         try:
@@ -281,6 +666,7 @@ class VoiceGatewayNode(Node):
             self.get_logger().error(
                 f"[voice_gateway] whisper_mic 缺少依赖: {e}；请 pip install -r requirements-voice.txt"
             )
+            self._mic_set_thread_alive(False)
             return
         except OSError as e:
             self.get_logger().error(
@@ -288,50 +674,10 @@ class VoiceGatewayNode(Node):
                 "Ubuntu / Debian / WSL: sudo apt-get update && sudo apt-get install -y portaudio19-dev "
                 f"安装后重试。原始错误: {e}"
             )
+            self._mic_set_thread_alive(False)
             return
 
-        def _default_input_index() -> int | None:
-            try:
-                pair = sd.default.device
-                if pair is None:
-                    return None
-                di = pair[0] if isinstance(pair, (list, tuple)) else pair
-                if di is None:
-                    return None
-                i = int(di)
-                return i if i >= 0 else None
-            except Exception:
-                return None
-
-        def _log_input_devices() -> None:
-            try:
-                found: list[str] = []
-                for i, d in enumerate(sd.query_devices()):
-                    if int(d.get("max_input_channels", 0) or 0) > 0:
-                        found.append(f"[{i}] {d.get('name', '')}")
-                if found:
-                    self.get_logger().info("[voice_gateway] 当前枚举到的输入设备: " + "; ".join(found))
-                else:
-                    self.get_logger().warning("[voice_gateway] 未枚举到任何输入通道>0 的音频设备。")
-            except Exception as ex:
-                self.get_logger().warning(f"[voice_gateway] 枚举音频设备失败: {ex}")
-
-        use_device: int | str
-        if self._mic_device is not None:
-            use_device = self._mic_device
-        else:
-            di = _default_input_index()
-            if di is None:
-                _log_input_devices()
-                self.get_logger().error(
-                    "[voice_gateway] whisper_mic 无法打开麦克风：无有效默认输入设备（PortAudio 常为 device=-1）。"
-                    "WSL 内通常没有转发笔记本麦克风，请在 Windows 原生终端运行本节点，或在 WSL 配置好 PulseAudio/管道后"
-                    "执行: python3 -c \"import sounddevice as sd; print(sd.query_devices())\"，再用 -p mic_device_index:=<数字> 指定设备（-1 为默认）。"
-                )
-                return
-            use_device = di
-            self.get_logger().info(f"[voice_gateway] whisper_mic 使用默认输入设备 index={use_device}")
-
+        self._mic_set_thread_alive(True)
         sr = self._mic_sr
         block = max(int(sr * self._mic_block_ms / 1000.0), 128)
         silence_samples_need = int(sr * self._mic_silence_sec)
@@ -342,65 +688,172 @@ class VoiceGatewayNode(Node):
         silence_run = 0
         had_voice = False
 
+        stream: Any = None
+        use_device: int | str | None = None
+        stream_kw_base: dict[str, Any] = {
+            "samplerate": sr,
+            "channels": 1,
+            "dtype": "float32",
+            "blocksize": block,
+        }
+        deadline = time.monotonic() + self._mic_open_retry_sec
+        attempt_round = 0
+        while stream is None and time.monotonic() < deadline:
+            if self._mic_stop and self._mic_stop.is_set():
+                return
+            candidates = self._mic_input_device_candidates(sd)
+            if not candidates:
+                attempt_round += 1
+                if attempt_round == 1 or attempt_round % 5 == 0:
+                    self.get_logger().warning(
+                        f"[voice_gateway] 尚无输入设备，{self._mic_open_retry_sec:.0f}s 内重试…"
+                        "（与 Whisper 加载并行；勿在另一终端运行 check_mic_devices.sh）"
+                    )
+                time.sleep(2.0)
+                continue
+            for dev in candidates:
+                try:
+                    self.get_logger().info(
+                        f"[voice_gateway] whisper_mic 尝试打开输入设备 "
+                        f"{'index=' + str(dev) if isinstance(dev, int) else 'name=' + repr(dev)}"
+                    )
+                    stream = sd.InputStream(**stream_kw_base, device=dev)
+                    stream.start()
+                    with self._mic_stream_lock:
+                        self._mic_stream = stream
+                    use_device = dev
+                    break
+                except Exception as ex:
+                    self.get_logger().warning(
+                        f"[voice_gateway] 打开设备 {dev!r} 失败: {ex}；尝试下一个候选"
+                    )
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except Exception:
+                            pass
+                        stream = None
+            if stream is None:
+                attempt_round += 1
+                time.sleep(2.0)
+        if stream is None or use_device is None:
+            self.get_logger().error(
+                f"[voice_gateway] whisper_mic 在 {self._mic_open_retry_sec:.0f}s 内仍无法打开麦克风。"
+                "请先停 full_system 后运行: bash scripts/check_mic_devices.sh"
+            )
+            self._mic_set_thread_alive(False)
+            return
+
+        self._mic_set_stream_open(True)
+        self._mic_note_read(0.0)
+        self._append_mic_health_jsonl(self._collect_mic_health_snapshot(event="stream_open"))
+
+        self.get_logger().info(
+            f"[voice_gateway] whisper_mic 已打开输入 "
+            f"{'index=' + str(use_device) if isinstance(use_device, int) else 'name=' + repr(use_device)}，"
+            "请说话（说完停顿约 0.6s 触发识别）"
+        )
+
         try:
-            stream_kw: dict[str, Any] = {
-                "samplerate": sr,
-                "channels": 1,
-                "dtype": "float32",
-                "blocksize": block,
-                "device": use_device,
-            }
-            with sd.InputStream(**stream_kw) as stream:
-                self.get_logger().info("[voice_gateway] whisper_mic 麦克风已打开，请说话（说完停顿约 0.6s 触发识别）")
-                while self._mic_stop and not self._mic_stop.is_set():
-                    data, overflowed = stream.read(block)
-                    if overflowed:
-                        self.get_logger().warning("[voice_gateway] whisper_mic 输入溢出，可能丢字")
-                    chunk = np.asarray(data, dtype=np.float32).reshape(-1)
-                    rms = float(np.sqrt(np.mean(chunk * chunk))) if chunk.size else 0.0
-                    if self._mic_debug_rms:
-                        bs_dbg = sum(x.size for x in buf)
-                        if had_voice or bs_dbg > 0:
-                            now = time.monotonic()
-                            if now - self._mic_dbg_last_log >= 0.5:
-                                self._mic_dbg_last_log = now
-                                self.get_logger().info(
-                                    f"[voice_gateway] whisper_mic dbg rms={rms:.5f} thr={thresh} "
-                                    f"had_voice={had_voice} buf_samples={bs_dbg}"
-                                )
-                    loud = rms >= thresh
-                    if loud:
-                        had_voice = True
-                        silence_run = 0
+            while self._mic_stop and not self._mic_stop.is_set():
+                data, overflowed = stream.read(block)
+                if overflowed:
+                    self._mic_note_overflow()
+                    self.get_logger().warning("[voice_gateway] whisper_mic 输入溢出，可能丢字")
+                chunk = np.asarray(data, dtype=np.float32).reshape(-1)
+                rms = float(np.sqrt(np.mean(chunk * chunk))) if chunk.size else 0.0
+                self._mic_note_read(rms)
+                if self._mic_debug_rms:
+                    bs_dbg = sum(x.size for x in buf)
+                    if had_voice or bs_dbg > 0:
+                        now = time.monotonic()
+                        if now - self._mic_dbg_last_log >= 0.5:
+                            self._mic_dbg_last_log = now
+                            self.get_logger().info(
+                                f"[voice_gateway] whisper_mic dbg rms={rms:.5f} thr={thresh} "
+                                f"had_voice={had_voice} buf_samples={bs_dbg}"
+                            )
+                loud = rms >= thresh
+                if loud:
+                    had_voice = True
+                    silence_run = 0
+                    buf.append(chunk)
+                else:
+                    if had_voice:
                         buf.append(chunk)
-                    else:
-                        if had_voice:
-                            buf.append(chunk)
-                            silence_run += int(chunk.size)
-                            if silence_run >= silence_samples_need:
-                                audio = np.concatenate(buf).astype(np.float32, copy=False)
-                                buf.clear()
-                                had_voice = False
-                                silence_run = 0
-                                if audio.size < min_samples:
-                                    continue
-                                self.get_logger().info(
-                                    f"[voice_gateway] whisper_mic 切段 {audio.size / sr:.2f}s，已入队转写…"
-                                )
-                                q = self._mic_segment_q
-                                if q is not None:
-                                    try:
-                                        q.put_nowait((audio, thresh))
-                                    except queue.Full:
-                                        self.get_logger().warning(
-                                            "[voice_gateway] whisper_mic 转写队列满，丢弃本段（请等上一段转写完成）"
-                                        )
+                        silence_run += int(chunk.size)
+                        if silence_run >= silence_samples_need:
+                            audio = np.concatenate(buf).astype(np.float32, copy=False)
+                            buf.clear()
+                            had_voice = False
+                            silence_run = 0
+                            if audio.size < min_samples:
+                                continue
+                            self._mic_note_segment()
+                            self.get_logger().info(
+                                f"[voice_gateway] whisper_mic 切段 {audio.size / sr:.2f}s，已入队转写…"
+                            )
+                            q = self._mic_segment_q
+                            if q is not None:
+                                try:
+                                    q.put_nowait((audio, thresh))
+                                except queue.Full:
+                                    self.get_logger().warning(
+                                        "[voice_gateway] whisper_mic 转写队列满，丢弃本段（请等上一段转写完成）"
+                                    )
         except Exception as e:
-            _log_input_devices()
             self.get_logger().error(
                 f"[voice_gateway] whisper_mic 麦克风线程退出: {e}。"
-                "若含 device -1：多为无可用麦克风；WSL 建议换 Windows 运行或配置音频后设置 mic_device_index / mic_device_name。"
+                "WSL 可试 -p mic_device_index:=0；若 Pulse Timeout 多为 default 设备，勿用 index=1。"
             )
+        finally:
+            self._mic_set_stream_open(False)
+            self._append_mic_health_jsonl(self._collect_mic_health_snapshot(event="stream_close"))
+            with self._mic_stream_lock:
+                if self._mic_stream is stream:
+                    self._mic_stream = None
+            if stream is not None:
+                try:
+                    stream.stop()
+                    stream.close()
+                except Exception:
+                    pass
+            self._mic_set_thread_alive(False)
+
+    _PROMPT_ECHO_FRAGMENTS = (
+        "请用简体中文",
+        "勿用繁体",
+        "简体中文输出",
+    )
+
+    def _postprocess_whisper_text(self, text: str, segments: list[Any], *, info: Any = None) -> str:
+        """去掉静音幻听的 initial_prompt 回声及明显无语音段。"""
+        t = (text or "").strip()
+        if not t:
+            return ""
+        prompt = self._whisper_initial_prompt
+        if prompt:
+
+            def _norm(s: str) -> str:
+                return re.sub(r"[\s，。、；：\"'「」！？,.;:!?\-]+", "", s)
+
+            pn, tn = _norm(prompt), _norm(t)
+            if pn and (pn in tn or tn in pn):
+                return ""
+        if len(t) <= 36:
+            for frag in self._PROMPT_ECHO_FRAGMENTS:
+                if frag in t:
+                    return ""
+        if segments:
+            nsp = [float(getattr(s, "no_speech_prob", 0.0) or 0.0) for s in segments]
+            if nsp and min(nsp) > 0.72 and len(t) < 48:
+                return ""
+            logprobs = [getattr(s, "avg_logprob", None) for s in segments]
+            logprobs = [float(x) for x in logprobs if x is not None]
+            if logprobs and max(logprobs) < -0.95 and len(t) < 24:
+                return ""
+        _ = info
+        return t
 
     def _append_speech_log_file(self, text: str) -> None:
         if not self._speech_log_path:
@@ -424,7 +877,7 @@ class VoiceGatewayNode(Node):
 
     def _ensure_whisper(self) -> Any:
         if self._whisper_model is not None:
-            return self._whisper_model
+            return self._whisper_model  # 同进程内复用，不会重复构造
         try:
             from faster_whisper import WhisperModel
         except ImportError as e:
@@ -469,10 +922,13 @@ class VoiceGatewayNode(Node):
                 except OSError:
                     is_wsl = False
                 if is_wsl:
+                    prep_hint = (
+                        f"python3 scripts/prep_faster_whisper.py --size {size} "
+                        f"--device {dev} --compute-type {ctype}"
+                    )
                     self.get_logger().info(
                         "[voice_gateway] WSL 下使用 CUDA 加载 Whisper；若长时间无「模型就绪」，"
-                        "多为首次下载权重或驱动问题，可先运行 scripts/prep_faster_whisper.py，"
-                        "或临时 -p mic_force_cpu_on_wsl:=true -p whisper_device:=cpu。"
+                        f"可在另一终端用与节点相同参数热身: {prep_hint}"
                     )
             # CPU + int8 在部分 WSL/ctranslate2 上会导致 WhisperModel() 永不返回，见不到「模型就绪」
             if dev == "cpu" and ctype.lower() in ("int8", "int8_float32", "int8_bfloat16"):
@@ -492,10 +948,16 @@ class VoiceGatewayNode(Node):
                     f"[voice_gateway] whisper_download_root={self._whisper_download_root!r}（权重将放于此）"
                 )
             self.get_logger().info(f"[voice_gateway] 加载 WhisperModel size={size} device={dev} compute={ctype}")
+            prep_cmd = (
+                f"python3 scripts/prep_faster_whisper.py --size {size} "
+                f"--device {dev} --compute-type {ctype}"
+            )
             self.get_logger().info(
-                "[voice_gateway] 正在构造 WhisperModel…（权重与 prep 时相同，Hub 上无单独的「GPU int8 包」；"
-                "若已 prep 仍长时间无输出，多为本机 device/compute 初始化——WSL+CUDA 常见卡住，"
-                "可另终端用相同参数运行 scripts/prep_faster_whisper.py 热身，或 whisper_device:=cpu）"
+                "[voice_gateway] 正在构造 WhisperModel…（权重与 prep 相同；Hub 上无单独「GPU int8 包」，"
+                f"int8 指 CTranslate2 在 {dev} 上的量化推理）"
+            )
+            self.get_logger().info(
+                f"[voice_gateway] 若长时间无「模型就绪」，可在另一终端先热身（参数须一致）: {prep_cmd}"
             )
             t0 = time.monotonic()
             try:
@@ -513,7 +975,11 @@ class VoiceGatewayNode(Node):
                     f"[voice_gateway] WhisperModel 构造失败: {ex}\n{traceback.format_exc()}"
                 )
                 return None
-            self.get_logger().info(f"[voice_gateway] Whisper 模型就绪，耗时 {time.monotonic() - t0:.2f}s")
+            elapsed = time.monotonic() - t0
+            self.get_logger().info(
+                f"[voice_gateway] Whisper 模型就绪，耗时 {elapsed:.2f}s"
+                "（此后本进程内转写不再重复加载；仅重启 launch/节点会再花同样时间初始化 GPU）"
+            )
             return self._whisper_model
 
     def _on_wav_path(self, msg: String) -> None:
@@ -538,8 +1004,11 @@ class VoiceGatewayNode(Node):
             if self._whisper_initial_prompt:
                 tw_kw["initial_prompt"] = self._whisper_initial_prompt
             with self._whisper_lock:
-                segments, _info = model.transcribe(str(p.resolve()), **tw_kw)
-            text = "".join(s.text for s in segments).strip()
+                segments, info = model.transcribe(str(p.resolve()), **tw_kw)
+                seg_list = list(segments)
+            text = self._postprocess_whisper_text(
+                "".join(s.text for s in seg_list).strip(), seg_list, info=info
+            )
             dt = time.monotonic() - t0
             if not text:
                 self.get_logger().warning(f"[voice_gateway] 转写结果为空: {path} ({dt:.2f}s)")

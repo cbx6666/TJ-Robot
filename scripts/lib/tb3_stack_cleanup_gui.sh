@@ -2,6 +2,9 @@
 # 由 scripts/tb3_stack.sh source；依赖: SCRIPT_DIR、TB3_LOG_DIR、TB3_ENABLE_*、RVIZ_CONFIG_FILE。
 
 cleanup_old() {
+  pkill -9 -f tj_nav2_trigger_navigation_manager_startup_after_map_server 2>/dev/null || true
+  pkill -9 -f component_container 2>/dev/null || true
+  pkill -9 -f spawn_entity.py 2>/dev/null || true
   pkill -9 -f scan_rviz_relay 2>/dev/null || true
   pkill -9 gzserver 2>/dev/null || true
   pkill -9 gzclient 2>/dev/null || true

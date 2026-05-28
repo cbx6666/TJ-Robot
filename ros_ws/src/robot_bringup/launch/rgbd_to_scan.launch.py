@@ -1,8 +1,9 @@
 # pyright: reportMissingImports=false
 """深度图 -> PointCloud2 -> LaserScan(/scan_rgbd)，供 slam_toolbox 使用。
 
-默认话题对齐本仓库合并的 Gazebo 插件（camera_name=tb3_depth_only，挂在 camera_depth_frame）：
-  /tb3_depth_only/depth/image_raw + /tb3_depth_only/depth/camera_info
+默认话题对齐一体 RGB-D（TB3_SIM_UNIFIED_RGBD=1）：
+  /camera/depth/image_raw + /camera/depth/camera_info
+旧双相机：/tb3_depth_only/depth/*
 若实际与模型不一致，请用 launch 参数覆盖（可先 ros2 topic list 确认）。
 
 另启动 depth_image_to_viz：把 32FC1/16UC1 转为 mono8，便于 RViz Image 显示。
@@ -93,12 +94,12 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'depth_image_topic',
-            default_value='/tb3_depth_only/depth/image_raw',
-            description='仿真深度图（与 URDF 片段中 camera_name 一致）',
+            default_value='/camera/depth/image_raw',
+            description='仿真深度图（一体 RGB-D 或 tb3_depth_only）',
         ),
         DeclareLaunchArgument(
             'depth_camera_info_topic',
-            default_value='/tb3_depth_only/depth/camera_info',
+            default_value='/camera/depth/camera_info',
             description='与深度图同分辨率的 CameraInfo',
         ),
         DeclareLaunchArgument(

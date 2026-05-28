@@ -85,6 +85,8 @@ def _include_selected_nav2(context, *args, **kwargs):
                             "use_sim_time": ParameterValue(
                                 LaunchConfiguration("use_sim_time"), value_type=bool
                             ),
+                            "patrol_trigger_mode": "auto",
+                            "task_events_topic": "/task/events",
                             "map_yaml": LaunchConfiguration("map"),
                             "waypoint_timeout_sec": ParameterValue(
                                 LaunchConfiguration("waypoint_timeout_sec"),

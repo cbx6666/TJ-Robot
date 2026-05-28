@@ -85,7 +85,8 @@ controller_server:
       plugin: "nav2_controller::SimpleGoalChecker"
       stateful: true
       xy_goal_tolerance: 0.30
-      yaw_goal_tolerance: 0.50
+      # 原 0.50rad≈29°：到点后仍会认为“未对准”而继续慢转
+      yaw_goal_tolerance: 0.18
 
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
@@ -113,6 +114,7 @@ controller_server:
       transform_tolerance: 0.2
       xy_goal_tolerance: 0.30
       trans_stopped_velocity: 0.05
+      rot_stopped_velocity: 0.04
       short_circuit_trajectory_evaluation: true
       stateful: true
       critics:
@@ -130,8 +132,8 @@ controller_server:
       GoalAlign.forward_point_distance: 0.1
       PathDist.scale: 32.0
       GoalDist.scale: 20.0
-      RotateToGoal.scale: 12.0
-      RotateToGoal.slowing_factor: 5.0
+      RotateToGoal.scale: 16.0
+      RotateToGoal.slowing_factor: 10.0
       RotateToGoal.lookahead_time: -1.0
 
 behavior_server:

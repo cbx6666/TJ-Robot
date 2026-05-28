@@ -13,6 +13,11 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+from tb3_camera_mount import camera_rgb_z_m  # noqa: E402
+
 # 与 Gazebo 中 TurtleBot3 LDS（base_scan）量程上限一致，RGB 远裁剪与之对齐可略减无效远景渲染
 TB3_LASER_RANGE_MAX_M = 3.5
 RGB_HORIZONTAL_FOV_RAD = math.radians(135.0)
@@ -73,9 +78,10 @@ def _rgb_link_and_joint() -> tuple[ET.Element, ET.Element]:
   </sensor>
 </link>
 """.strip()
-    joint_xml = """
+    z = camera_rgb_z_m()
+    joint_xml = f"""
 <joint name="camera_rgb_joint" type="fixed">
-  <pose>0.064 -0.065 0.094 0 0 0</pose>
+  <pose>0.064 -0.065 {z:.4f} 0 0 0</pose>
   <parent>base_link</parent>
   <child>camera_rgb_frame</child>
 </joint>

@@ -78,12 +78,16 @@ tj_nav2_map_yaml_ascii_workdir() {
 # 说明：仅 pkill *.launch.py 不够——若 launch 父进程已退出而子节点仍存活（init 收养），
 # 其 cmdline 里不再有 launch 文件名，需再按 Humble 等安装路径下的 lib/nav2_* 可执行文件补杀。
 tj_kill_nav2_background_launch() {
-  echo "tj_kill_nav2_background_launch: 结束残留的 Nav2 launch ..."
+  if [[ "${TB3_QUIET_NAV2_CLEANUP:-0}" != "1" ]]; then
+    echo "tj_kill_nav2_background_launch: 结束残留的 Nav2 launch ..."
+  fi
   pkill -f 'navigation\.launch\.py' 2>/dev/null || true
   pkill -f 'tj_static_map_nav2\.launch\.py' 2>/dev/null || true
   pkill -f 'ros2 launch robot_navigation' 2>/dev/null || true
   sleep 1
-  echo "tj_kill_nav2_background_launch: 结束可能孤儿化的 Nav2 组件 (*/lib/nav2_* …) ..."
+  if [[ "${TB3_QUIET_NAV2_CLEANUP:-0}" != "1" ]]; then
+    echo "tj_kill_nav2_background_launch: 结束可能孤儿化的 Nav2 组件 (*/lib/nav2_* …) ..."
+  fi
   pkill -f '/lib/nav2_' 2>/dev/null || true
   pkill -f '/libexec/nav2_' 2>/dev/null || true
   sleep 1

@@ -34,7 +34,8 @@
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>visualization_msgs</exec_depend>
-  <exec_depend>robot_bringup</exec_depend>
+  <!-- 地图在 robot_bringup/share/maps，launch 用 FindPackageShare 运行时解析；
+       勿在此 exec_depend robot_bringup，否则与 bringup→navigation 形成环，colcon 无法排序。 -->
 
   <export>
     <build_type>ament_cmake</build_type>

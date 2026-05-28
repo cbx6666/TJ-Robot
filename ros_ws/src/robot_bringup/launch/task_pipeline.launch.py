@@ -30,8 +30,17 @@ def generate_launch_description():
     parsed_intent_topic = LaunchConfiguration("parsed_intent_topic")
     task_events_topic = LaunchConfiguration("task_events_topic")
     navigate_to_pose_action = LaunchConfiguration("navigate_to_pose_action")
+    map_yaml = LaunchConfiguration("map_yaml")
+    mic_device_index = LaunchConfiguration("mic_device_index")
+    mic_speech_rms_threshold = LaunchConfiguration("mic_speech_rms_threshold")
+    mic_min_speech_sec = LaunchConfiguration("mic_min_speech_sec")
+    mic_health_log_path = LaunchConfiguration("mic_health_log_path")
+    mic_health_interval_sec = LaunchConfiguration("mic_health_interval_sec")
+    mic_stall_alert_sec = LaunchConfiguration("mic_stall_alert_sec")
+    enable_sim_speech_gui = LaunchConfiguration("enable_sim_speech_gui")
 
     share = get_package_share_directory("robot_bringup")
+    default_map = os.path.join(share, "maps", "map.yaml")
     default_prompt = os.path.join(share, "config", "voice_llm_system_prompt.txt")
     return LaunchDescription([
         DeclareLaunchArgument("use_sim_time", default_value="true"),
@@ -49,6 +58,18 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("task_events_topic", default_value="/task/events"),
         DeclareLaunchArgument("navigate_to_pose_action", default_value="navigate_to_pose"),
+        DeclareLaunchArgument("map_yaml", default_value=default_map),
+        DeclareLaunchArgument("mic_device_index", default_value="-1"),
+        DeclareLaunchArgument(
+            "mic_speech_rms_threshold",
+            default_value="0.02",
+            description="whisper_mic RMS 门限，环境噪大可用 0.025~0.04",
+        ),
+        DeclareLaunchArgument("mic_min_speech_sec", default_value="0.38"),
+        DeclareLaunchArgument("mic_health_log_path", default_value=""),
+        DeclareLaunchArgument("mic_health_interval_sec", default_value="5.0"),
+        DeclareLaunchArgument("mic_stall_alert_sec", default_value="4.0"),
+        DeclareLaunchArgument("enable_sim_speech_gui", default_value="false"),
         _inc(
             share,
             "interaction.launch.py",
@@ -62,6 +83,13 @@ def generate_launch_description():
                 "llm_model": llm_model,
                 "llm_api_key_env": llm_api_key_env,
                 "system_prompt_file": system_prompt_file,
+                "mic_device_index": mic_device_index,
+                "mic_speech_rms_threshold": mic_speech_rms_threshold,
+                "mic_min_speech_sec": mic_min_speech_sec,
+                "mic_health_log_path": mic_health_log_path,
+                "mic_health_interval_sec": mic_health_interval_sec,
+                "mic_stall_alert_sec": mic_stall_alert_sec,
+                "enable_sim_speech_gui": enable_sim_speech_gui,
             },
         ),
         _inc(
@@ -72,6 +100,7 @@ def generate_launch_description():
                 "parsed_intent_topic": parsed_intent_topic,
                 "task_events_topic": task_events_topic,
                 "navigate_to_pose_action": navigate_to_pose_action,
+                "map_yaml": map_yaml,
             },
         ),
         _inc(share, "manipulation.launch.py", {"use_sim_time": use_sim_time}),

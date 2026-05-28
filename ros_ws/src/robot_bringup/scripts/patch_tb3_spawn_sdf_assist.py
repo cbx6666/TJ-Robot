@@ -13,6 +13,11 @@ import re
 import sys
 from pathlib import Path
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+from tb3_camera_mount import camera_rgb_z_m, patch_sdf_camera_mount  # noqa: E402
+
 
 def strip_link_collisions(sdf_text: str, link_name: str) -> tuple[str, int]:
     rx = re.compile(
@@ -65,6 +70,16 @@ def main() -> int:
         action="store_true",
         help="Remove collision shapes on camera_rgb_frame (reduces LDS self-occlusion).",
     )
+    p.add_argument(
+        "--camera-rgb-z",
+        default="",
+        help="主相机关节 Z（m，相对 base_link）；空则读 TB3_CAMERA_RGB_Z_M 或默认 0.89（改 camera_joint，非 rgb 小偏移）",
+    )
+    p.add_argument(
+        "--no-camera-mount-raise",
+        action="store_true",
+        help="不抬高相机（保持官方 SDF 高度）",
+    )
     args = p.parse_args()
 
     path = args.sdf_file
@@ -84,9 +99,23 @@ def main() -> int:
     if dev:
         text, laser_n = patch_laser_ray_noise(text, "hls_lfcd_lds", dev)
 
+    mount_n = 0
+    if not args.no_camera_mount_raise:
+        z_arg = args.camera_rgb_z.strip()
+        z_m = float(z_arg) if z_arg else camera_rgb_z_m()
+        text, mount_n = patch_sdf_camera_mount(text, z_m)
+        if mount_n == 0:
+            print(
+                "WARN: 未改写相机高度（waffle 需 camera_rgb_frame link pose；burger 需 camera_rgb_joint）",
+                file=sys.stderr,
+            )
+
     if text != orig:
         path.write_text(text, encoding="utf-8")
-    print(f"STRIPPED_COLLISIONS={removed} LASER_NOISE_PATCHES={laser_n}")
+    print(
+        f"STRIPPED_COLLISIONS={removed} LASER_NOISE_PATCHES={laser_n} "
+        f"CAMERA_RGB_Z_PATCHES={mount_n}"
+    )
     return 0
 
 

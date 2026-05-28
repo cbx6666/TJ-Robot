@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import time
 from collections import deque
@@ -34,10 +35,20 @@ from lifecycle_msgs.msg import State
 from lifecycle_msgs.srv import GetState
 from nav_msgs.msg import Odometry
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
+from rclpy.duration import Duration
+from rclpy.time import Time
+from std_msgs.msg import String
+from tf2_ros import Buffer, TransformException, TransformListener
 
 from coverage_planner import CoveragePlanner, CoveragePlannerConfig
 from patrol_markers import PatrolMarkerPublisher
-from waypoint_utils import Pose2D, Waypoint, make_pose_stamped, normalize_angle
+from waypoint_utils import (
+    Pose2D,
+    Waypoint,
+    make_pose_stamped,
+    normalize_angle,
+    yaw_from_quaternion,
+)
 
 
 # =============================================================================
@@ -279,37 +290,254 @@ class NavigationManager:
         navigator.create_subscription(Odometry, self._odom_topic, self._on_odom, 20)
         navigator.create_subscription(Twist, cmd_monitor_topic, self._on_cmd_vel, 20)
 
-    def run(self) -> None:
-        """启动巡航。
+        self._patrol_publish_initial_pose = self._bool_param(
+            "patrol_publish_initial_pose_on_start", False
+        )
+        self._patrol_seed_pose_from_tf = self._bool_param(
+            "patrol_seed_initial_pose_from_tf", True
+        )
+        self._map_frame = self._str_param("map_frame", "map")
+        self._base_frame = self._str_param("robot_base_frame", "base_footprint")
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, navigator)
 
-        入口流程很短：设置初始位姿、等待 Nav2 active、生成巡视点，然后逐个交给
-        `_run_waypoint()` 状态机处理。单个 waypoint 的失败不会中断整个巡航。
+        self._patrol_trigger_mode = self._str_param("patrol_trigger_mode", "auto").strip().lower()
+        self._task_events_topic = self._str_param("task_events_topic", "/task/events")
+        self._events_pub = navigator.create_publisher(String, self._task_events_topic, 10)
+        self._patrol_start_requested = False
+        self._patrol_cancel_requested = False
+        self._is_patrolling = False
+        if self._patrol_trigger_mode == "event":
+            navigator.create_subscription(
+                String, self._task_events_topic, self._on_task_event, 10
+            )
+            navigator.get_logger().info(
+                f"Patrol trigger=event on {self._task_events_topic} "
+                "(publish patrol_start to begin; same as run_full_system voice)"
+            )
+
+    def run(self) -> None:
+        """启动巡航：auto=launch 后立即巡；event=等待 /task/events 的 patrol_start。"""
+
+        if self._patrol_trigger_mode == "event":
+            self._run_event_driven()
+        else:
+            self._run_auto_once()
+
+    def _run_auto_once(self) -> None:
+        if not self._ensure_nav2_ready():
+            return
+        self._execute_patrol_loop()
+
+    def _run_event_driven(self) -> None:
+        # 全链路 run_full_system 使用 defer_navigation_autostart：导航栈晚于本节点启动。
+        # 若在启动时立刻 wait Nav2，会在 map_server/导航 lifecycle 完成前超时（非正常现象）。
+        self._navigator.get_logger().info(
+            f"Event mode: waiting for patrol_start on {self._task_events_topic} "
+            "(Nav2 readiness is checked when patrol begins, not at node start)"
+        )
+        while rclpy.ok():
+            rclpy.spin_once(self._navigator, timeout_sec=0.2)
+            if self._patrol_start_requested and not self._is_patrolling:
+                self._patrol_start_requested = False
+                if not self._ensure_nav2_ready():
+                    self._publish_patrol_done(
+                        ok=False,
+                        canceled=False,
+                        completed=0,
+                        total=0,
+                    )
+                    continue
+                if self._patrol_cancel_requested:
+                    self._navigator.get_logger().info(
+                        "PATROL_ABORT before loop (stop during Nav2 wait, e.g. object found)"
+                    )
+                    self._publish_patrol_done(
+                        ok=False,
+                        canceled=True,
+                        completed=0,
+                        total=0,
+                    )
+                    self._patrol_cancel_requested = False
+                    continue
+                self._execute_patrol_loop()
+
+    def _current_map_pose_waypoint(self) -> Waypoint | None:
+        """从 TF 读取当前 map 位姿，用于可选的 AMCL 播种（不移动 Gazebo 模型）。"""
+
+        try:
+            transform = self._tf_buffer.lookup_transform(
+                self._map_frame,
+                self._base_frame,
+                Time(),
+                timeout=Duration(seconds=0.5),
+            )
+        except TransformException:
+            return None
+        t = transform.transform.translation
+        q = transform.transform.rotation
+        yaw = yaw_from_quaternion(q.z, q.w)
+        return Waypoint("current_tf", t.x, t.y, yaw)
+
+    def _seed_initial_pose_before_patrol(self) -> None:
+        """巡检开始前是否向 AMCL 发布 initial pose。
+
+        默认关闭：避免在 RViz/Nav2 已把机器人移到别处后，取物/巡检仍把地图坐标拉回 (0,0)，
+        而 Gazebo 模型仍在原地的“地图与仿真脱节”现象。
         """
 
-        self._navigator.get_logger().info(
-            "Publishing initial pose and waiting for Nav2 lifecycle nodes to become active"
-        )
-        initial_pose = Waypoint("initial_pose", 0.0, 0.0, 0.0)
-        self._navigator.setInitialPose(make_pose_stamped(self._navigator, initial_pose))
-        if not self._wait_for_nav2_ready(timeout_sec=45.0):
-            self._navigator.get_logger().error("PATROL_ABORT_NAV2_NOT_READY")
-            return
-        self._wait_for_initial_odom(timeout_sec=12.0)
-
-        waypoints = self._build_waypoints()
-        self._navigator.get_logger().info(f"PATROL_WAYPOINT_COUNT count={len(waypoints)}")
-        for index, waypoint in enumerate(waypoints, start=1):
+        if not self._patrol_publish_initial_pose:
             self._navigator.get_logger().info(
-                f"WAYPOINT_START {index}/{len(waypoints)} name={waypoint.name} "
-                f"x={waypoint.x:.2f} y={waypoint.y:.2f} yaw={waypoint.yaw:.2f}"
+                "PATROL_SKIP_INITIAL_POSE: 保持当前 AMCL 位姿（不重置到 map 原点）"
             )
-            reached = self._run_waypoint(waypoint, index, len(waypoints))
-            if reached:
-                self._markers.publish_done(waypoint)
+            return
+        waypoint = Waypoint("initial_pose", 0.0, 0.0, 0.0)
+        if self._patrol_seed_pose_from_tf:
+            current = self._current_map_pose_waypoint()
+            if current is not None:
+                waypoint = current
+                self._navigator.get_logger().info(
+                    "PATROL_INITIAL_POSE from TF "
+                    f"({waypoint.x:.2f}, {waypoint.y:.2f}, yaw={waypoint.yaw:.2f})"
+                )
             else:
-                self._markers.publish_skipped(waypoint)
+                self._navigator.get_logger().warning(
+                    "PATROL_INITIAL_POSE: TF 不可用，回退 map 原点 (0,0,0)"
+                )
+        else:
+            self._navigator.get_logger().info("PATROL_INITIAL_POSE fixed (0,0,0)")
+        self._navigator.setInitialPose(make_pose_stamped(self._navigator, waypoint))
 
-        self._navigator.get_logger().info("Patrol finished")
+    def _ensure_nav2_ready(self) -> bool:
+        default_timeout = 120.0 if self._patrol_trigger_mode == "event" else 45.0
+        timeout = self._float_param("nav2_ready_timeout_sec", default_timeout)
+        self._navigator.get_logger().info(
+            "Waiting for Nav2 lifecycle nodes to become active "
+            f"(timeout={timeout:g}s)"
+        )
+        self._seed_initial_pose_before_patrol()
+        if not self._wait_for_nav2_ready(timeout_sec=timeout):
+            self._navigator.get_logger().error("PATROL_ABORT_NAV2_NOT_READY")
+            return False
+        self._wait_for_initial_odom(timeout_sec=12.0)
+        return True
+
+    def _execute_patrol_loop(self) -> None:
+        if self._patrol_cancel_requested:
+            self._navigator.get_logger().info("PATROL_SKIP loop entry (already canceled)")
+            if self._patrol_trigger_mode == "event":
+                self._publish_patrol_done(
+                    ok=False,
+                    canceled=True,
+                    completed=0,
+                    total=0,
+                )
+            self._patrol_cancel_requested = False
+            return
+        self._is_patrolling = True
+        self._patrol_cancel_requested = False
+        completed = 0
+        has_failure = False
+        total = 0
+        try:
+            self._navigator.get_logger().info("PATROL_START coverage navigation")
+            waypoints = self._build_waypoints()
+            total = len(waypoints)
+            self._navigator.get_logger().info(f"PATROL_WAYPOINT_COUNT count={total}")
+            for index, waypoint in enumerate(waypoints, start=1):
+                if self._patrol_cancel_requested:
+                    self._navigator.get_logger().info("PATROL_CANCELED by stop event")
+                    break
+                self._navigator.get_logger().info(
+                    f"WAYPOINT_START {index}/{total} name={waypoint.name} "
+                    f"x={waypoint.x:.2f} y={waypoint.y:.2f} yaw={waypoint.yaw:.2f}"
+                )
+                reached = self._run_waypoint(waypoint, index, total)
+                if reached:
+                    completed += 1
+                    self._markers.publish_done(waypoint)
+                else:
+                    has_failure = True
+                    self._markers.publish_skipped(waypoint)
+                if self._patrol_cancel_requested:
+                    break
+            patrol_ok = (not self._patrol_cancel_requested) and (not has_failure)
+            self._navigator.get_logger().info(
+                f"PATROL_FINISHED ok={patrol_ok} completed={completed}/{total}"
+            )
+        finally:
+            if self._patrol_trigger_mode == "event":
+                patrol_ok = (not self._patrol_cancel_requested) and (not has_failure)
+                self._publish_patrol_done(
+                    ok=patrol_ok,
+                    canceled=self._patrol_cancel_requested,
+                    completed=completed,
+                    total=total,
+                )
+            self._is_patrolling = False
+            self._patrol_cancel_requested = False
+
+    def _on_task_event(self, msg: String) -> None:
+        raw = (msg.data or "").strip()
+        if not raw:
+            return
+        try:
+            event = json.loads(raw)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(event, dict):
+            return
+        event_name = str(event.get("event", "")).strip()
+        if event_name == "patrol_start":
+            if self._is_patrolling:
+                self._navigator.get_logger().info(
+                    "Patrol already running; ignore duplicate patrol_start"
+                )
+                return
+            scope = str(event.get("scope", "room_default"))
+            self._navigator.get_logger().info(
+                f"PATROL_EVENT_START scope={scope}"
+            )
+            self._patrol_start_requested = True
+            return
+        if event_name == "stop":
+            source = str(event.get("source", "")).strip()
+            self._patrol_cancel_requested = True
+            self._patrol_start_requested = False
+            if self._is_patrolling:
+                self._navigator.get_logger().info(
+                    f"PATROL_EVENT_STOP cancel requested source={source or 'unknown'}"
+                )
+                try:
+                    self._navigator.cancelTask()
+                except Exception:
+                    pass
+            else:
+                self._navigator.get_logger().info(
+                    f"PATROL_EVENT_STOP (pre-loop) source={source or 'unknown'}"
+                )
+            return
+
+    def _publish_patrol_done(
+        self,
+        *,
+        ok: bool,
+        canceled: bool,
+        completed: int,
+        total: int,
+    ) -> None:
+        payload = json.dumps(
+            {
+                "event": "patrol_done",
+                "ok": ok,
+                "canceled": canceled,
+                "completed_waypoints": completed,
+                "total_waypoints": total,
+            },
+            ensure_ascii=False,
+        )
+        self._events_pub.publish(String(data=payload))
+        self._navigator.get_logger().info(f"PATROL_EVENT_DONE -> {self._task_events_topic}: {payload}")
 
     def _run_waypoint(self, waypoint: Waypoint, index: int, total: int) -> bool:
         """执行单个 waypoint 的状态机。
@@ -334,6 +562,10 @@ class NavigationManager:
 
         state = self._transition(state, NavState.PLANNING, "waypoint_start")
         while rclpy.ok() and state != NavState.DONE:
+            if self._patrol_cancel_requested:
+                skip_reason = "patrol_stop_event"
+                state = self._transition(state, NavState.SKIP_WAYPOINT, skip_reason)
+                continue
             # 规划类状态共用一套路线选择逻辑。这里不会直接沿用旧路径，必须重新 getPath。
             if state in (
                 NavState.PLANNING,
@@ -375,6 +607,12 @@ class NavigationManager:
                     state = self._transition(state, NavState.SKIP_WAYPOINT, skip_reason)
                     continue
                 outcome = self._monitor_navigation(selected_route)
+                if outcome.status == "canceled":
+                    self._navigator.get_logger().info(
+                        f"WAYPOINT_CANCELED name={waypoint.name} reason={outcome.reason}"
+                    )
+                    state = self._transition(state, NavState.DONE, "patrol_canceled")
+                    return False
                 if outcome.status == "reached":
                     self._navigator.get_logger().info(
                         f"WAYPOINT_REACHED name={selected_route.goal.name} "
@@ -494,6 +732,9 @@ class NavigationManager:
 
         while rclpy.ok() and not self._navigator.isTaskComplete():
             rclpy.spin_once(self._navigator, timeout_sec=0.05)
+            if self._patrol_cancel_requested:
+                self._navigator.cancelTask()
+                return NavOutcome("canceled", "patrol_stop_event", self._latest_pose)
             now = time.monotonic()
             feedback = self._navigator.getFeedback()
             distance = self._feedback_distance(feedback)
@@ -1510,6 +1751,18 @@ class NavigationManager:
                     "patrol_escape_backward_duration_sec": 1.0,
                     "patrol_escape_rotate_duration_sec": 0.7,
                     "patrol_escape_arc_duration_sec": 1.0,
+                },
+            ),
+            (
+                "任务事件触发（run_full_system 语音巡检）",
+                {
+                    "patrol_trigger_mode": "auto",
+                    "task_events_topic": "/task/events",
+                    "nav2_ready_timeout_sec": 45.0,
+                    "patrol_publish_initial_pose_on_start": False,
+                    "patrol_seed_initial_pose_from_tf": True,
+                    "map_frame": "map",
+                    "robot_base_frame": "base_footprint",
                 },
             ),
         ]

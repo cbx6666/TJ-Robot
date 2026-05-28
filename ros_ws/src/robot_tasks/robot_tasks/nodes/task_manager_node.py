@@ -101,6 +101,19 @@ class TaskManagerNode(Node):
                 self._publish_status_event(
                     "DONE" if ev.get("ok") else "FAILED", raw[:200]
                 )
+            elif isinstance(ev, dict) and ev.get("event") == "fetch_object_started":
+                self._publish_status_event(
+                    "EXECUTING",
+                    f"fetch_search label={ev.get('object_label', '')}",
+                )
+            elif isinstance(ev, dict) and ev.get("event") == "fetch_object_done":
+                state = "DONE" if ev.get("ok") else "FAILED"
+                self._publish_status_event(state, raw[:200])
+            elif isinstance(ev, dict) and ev.get("event") == "fetch_object":
+                args = ev.get("args") if isinstance(ev.get("args"), dict) else {}
+                self._publish_status_event(
+                    "PLANNING", f"fetch_object label={args.get('object_label', '')}"
+                )
         except (json.JSONDecodeError, TypeError):
             pass
 
@@ -131,17 +144,9 @@ class TaskManagerNode(Node):
         text = msg.data.strip()
         if not text:
             return
-        # Minimal rule-based orchestration scaffold:
-        # focus on object pick/place semantics for RGBD + YOLO stage.
-        obj = self._infer_object(text)
-        coord = self._latest_target_coord_text()
-        if obj:
-            if coord:
-                self._mani_cmd_pub.publish(String(data=f"PICK:{obj};{coord}"))
-            else:
-                self._mani_cmd_pub.publish(String(data=f"PICK:{obj}"))
-        self._publish_status_event(
-            "EXECUTING", f"goal={text} object={obj or 'NA'} target={coord or 'NA'}"
+        # 取物由 object_fetch_orchestrator 编排（巡检→导航→PICK）；此处仅记日志。
+        self.get_logger().info(
+            f"[task_manager] goal_text（仅记录）: {text!r} target={self._latest_target_coord_text() or 'NA'}"
         )
 
     def _on_target_point(self, msg: PointStamped) -> None:

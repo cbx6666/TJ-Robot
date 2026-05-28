@@ -19,6 +19,7 @@ setup(
         "console_scripts": [
             "task_manager_node = robot_tasks.nodes.task_manager_node:main",
             "command_executor_node = robot_tasks.nodes.command_executor_node:main",
+            "object_fetch_orchestrator_node = robot_tasks.nodes.object_fetch_orchestrator_node:main",
             "patrol_smallhouse = robot_tasks.nodes.patrol_smallhouse:main",
         ],
     },
