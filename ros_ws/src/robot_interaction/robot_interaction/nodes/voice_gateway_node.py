@@ -707,7 +707,7 @@ class VoiceGatewayNode(Node):
                 if attempt_round == 1 or attempt_round % 5 == 0:
                     self.get_logger().warning(
                         f"[voice_gateway] 尚无输入设备，{self._mic_open_retry_sec:.0f}s 内重试…"
-                        "（与 Whisper 加载并行；勿在另一终端运行 check_mic_devices.sh）"
+                        "（与 Whisper 加载并行；勿在另一终端占用 WSL Pulse 测麦）"
                     )
                 time.sleep(2.0)
                 continue
@@ -739,7 +739,7 @@ class VoiceGatewayNode(Node):
         if stream is None or use_device is None:
             self.get_logger().error(
                 f"[voice_gateway] whisper_mic 在 {self._mic_open_retry_sec:.0f}s 内仍无法打开麦克风。"
-                "请先停 full_system 后运行: bash scripts/check_mic_devices.sh"
+                "请先停全栈: bash scripts/kill_simulation_stack.sh，并检查 WSLg Pulse / 麦克风隐私"
             )
             self._mic_set_thread_alive(False)
             return

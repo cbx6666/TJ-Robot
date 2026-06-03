@@ -44,17 +44,16 @@ bash scripts/run_nav2.sh               # 静态地图 Nav2 + 自动巡视（见�
 bash scripts/run_full_system.sh        # 【推荐】一键：仿真+Nav2+YOLO+LLM/任务（RViz 模拟语音，默认无麦）
 ```
 
-**一键说明**：`run_full_system.sh` 会依次拉起仿真栈、Nav2，等待约 25s 供 RViz 就绪，再前台启动 LLM/任务。在 **RViz → Sim Speech** 面板选指令并「发送 → LLM」。首次需 `colcon build --packages-select robot_rviz_plugins robot_interaction robot_bringup`。真麦：`export TJ_SIM_SPEECH_UI=0` 后再运行本脚本。
+**仿真一键（RViz 模拟语音）**：`run_full_system.sh` 拉起仿真、Nav2、YOLO、LLM/任务；在 **RViz → Sim Speech** 面板发送指令。首次需 `colcon build --packages-select robot_rviz_plugins robot_interaction robot_bringup`。
+
+**真麦语音**（WSL 需 WSLg；先单独测通再开全栈）：
 
 ```bash
-# 可选：改代码后只重启 LLM/任务（不重开 Gazebo）
-bash scripts/run_voice_stack.sh
-
-# 可选：仅仿真+Nav2 底座（高级分步）
-bash scripts/run_full_system_base.sh
+bash scripts/run_voice_llm_only.sh       # 仅 ASR + LLM，无仿真
+bash scripts/run_full_system_real_mic.sh # 一键全栈 + 真麦
 ```
 
-日志目录 `data/logs/full_system/`（跟踪 LLM：`tail -f data/logs/full_system/task_pipeline.launch.log`）。停实验：`bash scripts/kill_simulation_stack.sh`。真麦/WSL 音频问题见 [docs/first-time-setup.md](docs/first-time-setup.md)。
+配置 `local_llm.env`（见 `local_llm.env.example`）。日志目录 `data/logs/full_system/`；停止实验：`bash scripts/kill_simulation_stack.sh`。环境与麦克风说明见 [docs/first-time-setup.md](docs/first-time-setup.md)。
 
 Nav2 巡视入口已统一到 `scripts/run_nav2.sh`：脚本会启动 Gazebo 底盘、Nav2、单个 RViz，并默认运行 `robot_navigation/scripts/patrol_waypoints.py` 巡视当前地图。定位链路会先于导航链路启动，AMCL 默认使用仿真起点 `(0, 0, 0)`。手动点目标时可用：
 

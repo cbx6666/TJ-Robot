@@ -35,5 +35,5 @@ ps aux 2>/dev/null | grep -E '[g]zserver|[g]zclient|[r]viz2|[n]av2|[y]olo|compon
 echo ""
 echo "若 Gazebo/RViz 窗口仍无响应：在 Windows 任务管理器结束 gzclient / rviz2，或关闭 WSLg 窗口。"
 echo "若整机仍慢：PowerShell 管理员执行: wsl --shutdown  （会关闭整个 WSL）"
-echo "若 python3 -c 'import sounddevice' 仍卡住: bash scripts/recover_wsl_audio.sh"
+echo "若麦克风仍异常: Windows PowerShell 执行 wsl --shutdown 后重开 WSL"
 echo "Done."

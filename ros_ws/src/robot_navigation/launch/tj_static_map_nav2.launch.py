@@ -1,7 +1,7 @@
 # pyright: reportMissingImports=false
 """静态地图 + Nav2 的统一 ROS 入口（对齐 nav2_bringup：用 IncludeLaunchDescription 包一层 navigation.launch.py）。
 
-地图、params 路径仍由外层脚本（tj_sim_nav2_stack.sh）准备好（含 /tmp ASCII 拷贝）后通过 launch 参数传入，
+地图、params 路径由外层脚本（如 run_nav2.sh / run_simulation.sh）准备好（含 /tmp ASCII 拷贝）后通过 launch 参数传入，
 避免在多个 bash 里重复写 ros2 launch … navigation.launch.py。"""
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription

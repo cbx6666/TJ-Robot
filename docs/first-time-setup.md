@@ -88,11 +88,7 @@ WSL **没有**独立声卡，要靠 **WSLg** 把 Windows 麦克风经 PulseAudio
 [ -e /mnt/wslg/runtime-dir/pulse/native ] && export PULSE_SERVER=unix:/mnt/wslg/runtime-dir/pulse/native
 ```
 
-`bash scripts/run_full_system.sh` 会自动 `source scripts/lib/wsl_pulse_env.sh` 尝试设置；启动前可自检：
-
-```bash
-bash scripts/check_mic_devices.sh
-```
+`bash scripts/run_full_system_real_mic.sh` / `run_voice_llm_only.sh` 会自动 `source scripts/lib/wsl_pulse_env.sh`。
 
 仍无设备时请检查：Windows **设置 → 隐私 → 麦克风** 已允许「适用于 Linux 的 Windows 子系统」；WSL 为 **WSL2 + 带 GUI**（WSLg）；不要用纯 SSH 进 WSL 跑语音。
 
@@ -107,11 +103,7 @@ WSLg 把 Windows 麦克风经 **PulseAudio** 转给 Linux；该服务在 **整�
 wsl --shutdown
 ```
 
-然后重新打开 Cursor / WSL，再执行：
-
-```bash
-bash scripts/check_mic_devices.sh
-```
+然后重新打开 Cursor / WSL，再执行 `bash scripts/run_voice_llm_only.sh` 验证。
 
 **预防：**
 
@@ -119,42 +111,14 @@ bash scripts/check_mic_devices.sh
 bash scripts/kill_simulation_stack.sh   # 含语音栈 + 仿真，不要只 tb3_stack stop
 ```
 
-诊断脚本（会明确提示是否需要 `wsl --shutdown`）：
+环境噪导致频繁误「切段」时，可提高 RMS 门限（默认 **0.02**，最短有效语音 **0.38s**）：
 
 ```bash
-bash scripts/recover_wsl_audio.sh
+export TJ_MIC_SPEECH_RMS_THRESHOLD=0.03
+bash scripts/run_full_system_real_mic.sh
 ```
 
-### 复现「先 voice 再 base → 过一会不收音」并抓故障时刻
-
-1. `colcon build --packages-select robot_interaction robot_bringup`
-2. 三个终端：
-
-```bash
-# 终端 1
-bash scripts/run_voice_stack.sh
-
-# 终端 2（等 voice 里出现「已打开输入」「模型就绪」后）
-bash scripts/run_full_system_base.sh
-
-# 终端 3
-bash scripts/watch_voice_health.sh
-```
-
-3. 对着麦说话；当不再切段时查看：
-   - `data/logs/full_system/voice_gateway_health.jsonl`（每 5s 一行，`read_stall_sec` 持续增大 → `stream.read` 卡死）
-   - `data/logs/full_system/voice_health_incidents/incident_*.txt`（自动快照：gz/yolo/GPU/进程）
-   - `data/logs/full_system/voice_health_watch.log`（`state=mic_stall` 或 `pulse_dead` 的时刻 ≈ base 起后多久）
-
-**不要**在 voice 运行时另开终端 `python3 -c "import sounddevice"`，会干扰 WSL Pulse。
-
-环境噪导致频繁误「切段」时，可提高 RMS 门限（默认已由 0.01 调到 **0.02**，最短有效语音 **0.38s**）：
-
-```bash
-export TJ_MIC_SPEECH_RMS_THRESHOLD=0.03   # 仍敏感可试 0.035~0.04
-bash scripts/run_voice_stack.sh
-# 或 launch 参数: mic_speech_rms_threshold:=0.03 mic_debug_rms:=true  # 后者可在 log 里看实时 rms
-```
+语音异常时可查看 `data/logs/full_system/voice_gateway_health.jsonl` 与 `task_pipeline.launch.log`。
 
 **无麦克风联调全链路**（默认已开启，RViz 模拟语音）：
 

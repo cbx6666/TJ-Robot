@@ -15,6 +15,16 @@ cd "${ROS_WS}"
 OPTS=(--symlink-install "$@")
 colcon build "${OPTS[@]}"
 
+# symlink-install 时 install 链到源码；若脚本未 +x，ros2 launch 会报 executable not found
+for _exec in \
+  "${ROS_WS}/src/robot_navigation/scripts/patrol_waypoints.py" \
+  "${ROS_WS}/src/robot_navigation/scripts/coverage_monitor.py" \
+  "${ROS_WS}/src/robot_bringup/scripts/scan_rviz_relay.py"; do
+  if [[ -f "${_exec}" ]]; then
+    chmod +x "${_exec}"
+  fi
+done
+
 # 生成「LLM 凭据」加载片段：之后只需 source 工作区 install/setup.bash，即可自动 source 仓库根目录的 local_llm.env（若存在）。
 # 说明：colcon 每次会重写 install/setup.bash，故在每次成功 build 后按需重新追加钩子（通过 grep 避免重复块）。
 _tj_llm_helper="${ROS_WS}/install/tj_source_local_llm.bash"

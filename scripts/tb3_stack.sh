@@ -92,7 +92,7 @@ TB3_ENABLE_RSP="${TB3_ENABLE_RSP:-1}"
 mkdir -p "${TB3_LOG_DIR}"
 
 cleanup_old() {
-  # Nav2（navigation / tj_static_map_nav2）；与 scripts/kill_nav2.sh、common.sh 一致
+  # Nav2（navigation / tj_static_map_nav2）；与 common.sh tj_kill_nav2_background_launch 一致
   tj_kill_nav2_background_launch
   # run_simulation / run_full_system 后台 lifecycle 脚本（会反复 ros2 service call，停栈后仍占 CPU/DDS）
   pkill -9 -f tj_nav2_trigger_navigation_manager_startup_after_map_server 2>/dev/null || true
