@@ -37,13 +37,8 @@ setup(
     license="MIT",
     entry_points={
         "console_scripts": [
-            "yolo_object_seg_node = human_yolo_seg.perception.vision.yolo_detector_node:main",
-            "yolo_person_seg_node = human_yolo_seg.perception.vision.yolo_detector_node:main",
             "yolo_detector_node = human_yolo_seg.perception.vision.yolo_detector_node:main",
-            "person_detector_node = human_yolo_seg.perception.vision.person_detector_node:main",
-            "object_detector_node = human_yolo_seg.perception.vision.object_detector_node:main",
             "yolo_object_watch = human_yolo_seg.tools.yolo_object_watch:main",
-            "yolo_person_watch = human_yolo_seg.tools.yolo_person_watch:main",
         ],
     },
 )

@@ -5,7 +5,6 @@ cleanup_old() {
   pkill -9 -f tj_nav2_trigger_navigation_manager_startup_after_map_server 2>/dev/null || true
   pkill -9 -f component_container 2>/dev/null || true
   pkill -9 -f spawn_entity.py 2>/dev/null || true
-  pkill -9 -f scan_rviz_relay 2>/dev/null || true
   pkill -9 gzserver 2>/dev/null || true
   pkill -9 gzclient 2>/dev/null || true
   pkill -9 -x rviz2 2>/dev/null || true
@@ -18,7 +17,6 @@ cleanup_old() {
   pkill -9 -f '/robot_description std_msgs/msg/String' 2>/dev/null || true
   pkill -9 -f yolo_detector_node 2>/dev/null || true
   pkill -9 -f yolo_object_seg_node 2>/dev/null || true
-  pkill -9 -f yolo_person_seg_node 2>/dev/null || true
   pkill -9 -f async_slam_toolbox_node 2>/dev/null || true
   pkill -9 -f slam_toolbox 2>/dev/null || true
   pkill -9 -f point_cloud_xyz_node 2>/dev/null || true

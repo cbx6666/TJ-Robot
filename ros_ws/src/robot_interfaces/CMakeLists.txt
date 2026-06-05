@@ -8,11 +8,7 @@ if(ROBOT_INTERFACES_ENABLE_ROSIDL)
   find_package(rosidl_default_generators REQUIRED)
   find_package(builtin_interfaces REQUIRED)
   rosidl_generate_interfaces(${PROJECT_NAME}
-    "msg/NodeStatus.msg"
     "msg/TaskStatus.msg"
-    "msg/VoiceCommand.msg"
-    "msg/TaskGoal.msg"
-    "srv/ManipulationCommand.srv"
     DEPENDENCIES builtin_interfaces
   )
   ament_export_dependencies(rosidl_default_runtime)

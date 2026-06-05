@@ -18,8 +18,7 @@ colcon build "${OPTS[@]}"
 # symlink-install 时 install 链到源码；若脚本未 +x，ros2 launch 会报 executable not found
 for _exec in \
   "${ROS_WS}/src/robot_navigation/scripts/patrol_waypoints.py" \
-  "${ROS_WS}/src/robot_navigation/scripts/coverage_monitor.py" \
-  "${ROS_WS}/src/robot_bringup/scripts/scan_rviz_relay.py"; do
+  "${ROS_WS}/src/robot_navigation/scripts/coverage_monitor.py"; do
   if [[ -f "${_exec}" ]]; then
     chmod +x "${_exec}"
   fi

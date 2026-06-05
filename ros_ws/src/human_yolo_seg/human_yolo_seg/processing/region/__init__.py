@@ -1,1 +1,0 @@
-"""Region accumulation adapters."""

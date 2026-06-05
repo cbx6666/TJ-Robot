@@ -111,13 +111,11 @@ cleanup_old() {
   pkill -9 -f '/robot_description std_msgs/msg/String' 2>/dev/null || true
   pkill -9 -f yolo_detector_node 2>/dev/null || true
   pkill -9 -f yolo_object_seg_node 2>/dev/null || true
-  pkill -9 -f yolo_person_seg_node 2>/dev/null || true
   pkill -9 -f async_slam_toolbox_node 2>/dev/null || true
   pkill -9 -f slam_toolbox 2>/dev/null || true
   pkill -9 -f point_cloud_xyz_node 2>/dev/null || true
   pkill -9 -f pointcloud_to_laserscan_node 2>/dev/null || true
   pkill -9 -f depth_image_to_viz.py 2>/dev/null || true
-  pkill -9 -f scan_rviz_relay 2>/dev/null || true
   # 卡住的 ros2 CLI / daemon 会导致终端「输入无响应」
   # 分阶段启动时若 voice 已在另一终端运行，daemon stop 会扰乱其 DDS/定时器（表现为不再切段）
   if [[ "${TB3_SKIP_DAEMON_STOP:-0}" != "1" ]]; then

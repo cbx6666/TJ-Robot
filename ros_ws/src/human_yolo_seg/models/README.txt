@@ -39,4 +39,4 @@ human_yolo_seg 模型目录说明
 
   ros2 run human_yolo_seg yolo_object_watch
 
-对检测结果进行终端观察（兼容别名 `yolo_person_watch`）。
+对检测结果进行终端观察。

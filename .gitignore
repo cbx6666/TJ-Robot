@@ -20,7 +20,10 @@ __pycache__/
 
 # Temporary/local SDF
 model_in.sdf
-/ros_ws/src/robot_bringup/models
+
+# Ignore large Gazebo model assets; keep README and moving_obstacle.sdf tracked
+/ros_ws/src/robot_bringup/models/aws_robomaker_*
+*.DS_Store
 
 # Local LLM / API keys (never commit)
 local_llm.env

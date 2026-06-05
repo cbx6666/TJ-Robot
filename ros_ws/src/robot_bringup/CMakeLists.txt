@@ -14,7 +14,5 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}
 )
 
-install(PROGRAMS scripts/scan_rviz_relay.py DESTINATION lib/${PROJECT_NAME} RENAME scan_rviz_relay)
-
 ament_package()
 

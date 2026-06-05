@@ -1,65 +1,59 @@
 # ros_ws/src
 
-## 1. 目录定位
+该目录是项目全部 ROS 2 包的源码根目录。
 
-`ros_ws/src/` 是本项目全部 ROS 2 功能包的源码根目录。  
-该目录仅存放 ROS 包源码，不存放工作区级脚本，也不存放构建产物。
+## 包职责
 
-## 2. 当前包划分
+| 包 | 主要内容 | 不负责 |
+|---|---|---|
+| `robot_bringup` | 系统 launch、地图、world、RViz、仿真资源 | 导航和任务算法 |
+| `robot_navigation` | Nav2、巡视、覆盖规划、卡死恢复 | Gazebo world 和任务语义 |
+| `human_yolo_seg` | YOLO 推理、RGB-D 深度采样、目标地图坐标 | 任务调度和导航 |
+| `robot_interaction` | 语音/文本输入、LLM 意图解析 | 直接控制底盘 |
+| `robot_tasks` | 命令执行、取物状态机、返航和任务事件 | mock 抓取几何判定 |
+| `robot_manipulation` | Gazebo 真值 mock 抓取和放置 | Nav2 返航 |
+| `robot_interfaces` | 跨包消息、服务和动作定义 | 业务实现 |
+| `robot_rviz_plugins` | RViz Sim Speech 面板 | 语音识别 |
 
-### 2.1 系统与仿真
+## 取物链路
 
-- `robot_bringup`
-  - 系统级 launch
-  - Gazebo world
-  - 地图资源
-  - 模型与仿真辅助文件
+```text
+robot_interaction
+  -> /interaction/parsed_intent
+robot_tasks/command_executor_node
+  -> /task/events: fetch_object
+robot_tasks/object_fetch_orchestrator_node
+  -> 巡视、目标锁定、Nav2 接近
+  -> /manipulation/command_text: PICK:...
+robot_manipulation/mock_pick_place_node
+  -> /manipulation/status_text: pick_success / pick_failed
+robot_tasks/object_fetch_orchestrator_node
+  -> Nav2 返回接令位置
+  -> /task/events: fetch_object_done
+```
 
-### 2.2 导航
+正常取物失败也会返航；显式 `STOP` 会中止并跳过返航。
 
-- `robot_navigation`
-  - Nav2 launch
-  - Nav2 参数
-  - 基于静态地图的导航入口
+## 包内组织
 
-### 2.3 感知
+推荐结构：
 
-- `human_yolo_seg`
-  - YOLO 检测节点
-  - 感知 launch
-  - 感知辅助工具
+```text
+<package>/
+├── launch/
+├── config/
+├── resource/
+├── <package>/nodes/
+├── <package>/utils/
+├── package.xml
+├── setup.py 或 CMakeLists.txt
+└── README.md
+```
 
-### 2.4 任务与交互
+## 开发注意
 
-- `robot_tasks`
-  - 任务管理节点与任务层逻辑
-- `robot_interaction`
-  - 语音输入与上层交互接口
-- `robot_manipulation`
-  - mock 操作执行接口
-- `robot_interfaces`
-  - 跨包消息、服务与动作接口定义
-
-## 3. 包内组织建议
-
-ROS 包内部建议按职责组织：
-
-- `launch/`：启动编排
-- `config/`：参数与 YAML 配置
-- `msg/`、`srv/`、`action/`：接口定义
-- `<package_name>/nodes/`：可运行节点
-- `<package_name>/utils/`：公共工具
-- `<package_name>/tools/`：离线工具或开发辅助脚本
-- `resource/`：`ament_python` 包索引文件
-
-## 4. 职责边界
-
-- `robot_bringup` 负责系统资源与系统级启动
-- `robot_navigation` 负责导航，不直接承载 Gazebo 世界和地图资源本体
-- 感知、任务、交互、操作相关能力应尽量保持包级独立
-
-## 5. 开发注意事项
-
-- 修改任何包源码后，都需要重新构建工作区
-- 若只是调整启动方式，优先修改 `launch/` 或顶层 `scripts/`
-- 若新增长期功能，应优先考虑独立包，而不是继续向已有大包堆积
+- 修改源码后重新构建对应包。
+- 重新构建后重新 `source ros_ws/install/setup.bash`。
+- 不要在 `ros_ws/install/` 中维护代码或模型。
+- 模型、大日志和实验结果应遵守 `.gitignore`，并在 README 中说明外部准备方式。
+- 包之间通过 topic、service、action 或 `robot_interfaces` 通信，避免直接导入其他包的内部节点实现。
