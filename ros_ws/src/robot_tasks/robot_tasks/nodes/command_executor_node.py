@@ -112,6 +112,9 @@ class CommandExecutorNode(Node):
             return
         if cmd == "fetch_object":
             label = self._extract_object_label(args)
+            self.get_logger().info(
+                f"[command_executor] parsed_intent=fetch_object object_label={label}"
+            )
             self._publish_desired_object_label(label)
             self._publish_event({"event": "fetch_object", "args": args, "payload": obj})
             return

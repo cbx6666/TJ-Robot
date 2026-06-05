@@ -6,7 +6,7 @@ wait_for_service() {
   local timeout_s="${2:-20}"
   local deadline=$((SECONDS + timeout_s))
   while (( SECONDS < deadline )); do
-    if ros2 service type "${name}" >/dev/null 2>&1; then
+    if ros2 service list --no-daemon --spin-time 1.0 2>/dev/null | grep -Fxq "${name}"; then
       return 0
     fi
     sleep 0.5
@@ -19,7 +19,7 @@ wait_for_topic() {
   local timeout_s="${2:-20}"
   local deadline=$((SECONDS + timeout_s))
   while (( SECONDS < deadline )); do
-    if ros2 topic info "${name}" >/dev/null 2>&1; then
+    if ros2 topic list --no-daemon --spin-time 1.0 2>/dev/null | grep -Fxq "${name}"; then
       return 0
     fi
     sleep 0.5

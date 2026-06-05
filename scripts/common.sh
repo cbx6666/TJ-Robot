@@ -115,7 +115,7 @@ tj_nav2_trigger_navigation_manager_startup_after_map_server() {
 
   local i=0
   while (( i < max_map_wait )); do
-    if ros2 lifecycle get /map_server 2>/dev/null | grep -qF "State: active"; then
+    if ros2 lifecycle get /map_server 2>/dev/null | grep -Eq '(^|State: )active([[:space:]]|$)'; then
       break
     fi
     sleep 1
@@ -129,7 +129,7 @@ tj_nav2_trigger_navigation_manager_startup_after_map_server() {
   i=0
   while (( i < 120 )); do
     if ros2 service list 2>/dev/null | grep -Fxq "/lifecycle_manager_navigation/manage_nodes"; then
-      if ros2 service call /lifecycle_manager_navigation/manage_nodes nav2_msgs/srv/ManageLifecycleNodes "{command: 1}"; then
+      if ros2 service call /lifecycle_manager_navigation/manage_nodes nav2_msgs/srv/ManageLifecycleNodes "{command: 0}"; then
         echo "tj_nav2_trigger_navigation_manager_startup_after_map_server: navigation STARTUP ok"
         return 0
       fi

@@ -129,19 +129,27 @@ wait_for_service() {
   local name="$1"
   local timeout_s="${2:-20}"
   local progress_label="${3:-}"
-  # 避免 TB3_GZSERVER_WAIT_SEC=0 等导致零次循环、立刻误判失败
-  if [[ "${timeout_s}" =~ ^[0-9]+$ ]] && (( timeout_s < 5 )); then
+  local t0=$SECONDS
+  local next_progress=$((t0 + 15))
+  local unlimited=0
+  if [[ "${timeout_s}" == "0" || "${timeout_s}" == "inf" || "${timeout_s}" == "infinite" ]]; then
+    unlimited=1
+  elif ! [[ "${timeout_s}" =~ ^[0-9]+$ ]]; then
+    timeout_s=20
+  elif (( timeout_s < 5 )); then
     timeout_s=5
   fi
-  local t0=$SECONDS
   local deadline=$((SECONDS + timeout_s))
-  local next_progress=$((t0 + 15))
-  while (( SECONDS < deadline )); do
-    if ros2 service type "${name}" >/dev/null 2>&1; then
+  while (( unlimited == 1 || SECONDS < deadline )); do
+    if ros2 service list --no-daemon --spin-time 1.0 2>/dev/null | grep -Fxq "${name}"; then
       return 0
     fi
     if [[ -n "${progress_label}" && SECONDS -ge next_progress ]]; then
-      echo "  -> ${progress_label}（已等 $(format_duration "$((SECONDS - t0))") / 最长 ${timeout_s}s）" >&2
+      if (( unlimited == 1 )); then
+        echo "  -> ${progress_label}（已等 $(format_duration "$((SECONDS - t0))") / 无时间上限）" >&2
+      else
+        echo "  -> ${progress_label}（已等 $(format_duration "$((SECONDS - t0))") / 最长 ${timeout_s}s）" >&2
+      fi
       next_progress=$((SECONDS + 15))
     fi
     sleep 0.5
@@ -154,7 +162,7 @@ wait_for_topic() {
   local timeout_s="${2:-20}"
   local deadline=$((SECONDS + timeout_s))
   while (( SECONDS < deadline )); do
-    if ros2 topic info "${name}" >/dev/null 2>&1; then
+    if ros2 topic list --no-daemon --spin-time 1.0 2>/dev/null | grep -Fxq "${name}"; then
       return 0
     fi
     sleep 0.5
@@ -414,14 +422,13 @@ do_start() {
   step_t0=$SECONDS
   step_begin "3" "8" "Spawn robot model"
   local wait_spawn_t0=$SECONDS
-  local _gz_wait="${TB3_GZSERVER_WAIT_SEC:-90}"
-  [[ "${_gz_wait}" =~ ^[0-9]+$ ]] || _gz_wait=90
-  ((_gz_wait < 15)) && _gz_wait=15
+  local _gz_wait="${TB3_GZSERVER_WAIT_SEC:-0}"
+  [[ "${_gz_wait}" =~ ^(0|[0-9]+|inf|infinite)$ ]] || _gz_wait=0
   if ! wait_for_service "/spawn_entity" "${_gz_wait}" "等待 gzserver 加载世界并暴露 /spawn_entity"; then
-    echo "ERROR: gzserver 未在 ${_gz_wait}s 内暴露 ROS 2 服务 /spawn_entity。" >&2
+    echo "ERROR: gzserver 未暴露 ROS 2 服务 /spawn_entity。" >&2
     echo "  常见原因: (1) gzserver 仍在加载 small_house 等大地图 (2) WSL/机械盘过慢 (3) 残留 gzserver 占坑。" >&2
     echo "  建议: 查看 tail -50 \"${TB3_LOG_DIR}/gzserver.log\"；尝试 bash scripts/tb3_stack.sh stop 后重试；" >&2
-    echo "  或加大等待: export TB3_GZSERVER_WAIT_SEC=120" >&2
+    echo "  如需主动设置上限: export TB3_GZSERVER_WAIT_SEC=300；默认 0 表示无限等待。" >&2
     if [[ -f "${TB3_LOG_DIR}/gzserver.log" ]]; then
       echo "----- gzserver.log (last 24 lines) -----" >&2
       tail -n 24 "${TB3_LOG_DIR}/gzserver.log" >&2 || true
@@ -535,19 +542,22 @@ do_start() {
     fi
   fi
   echo "  -> model preprocess done | took=$(format_duration "$((SECONDS - model_prep_t0))")"
-  # spawn_entity.py 内部会再次等待 /spawn_entity（默认 30s）。预处理较重时，偶发「bash 侧已看到服务、
-  # 到本进程启动时服务又未就绪」或 DDS 发现滞后；先小睡并二次确认，再带重试执行 spawn。
+  # spawn_entity.py internally waits for /spawn_entity too. Keep our second
+  # readiness check unlimited by default so slow Gazebo/world loading is not
+  # mistaken for failure.
   sleep 2
-  if ! wait_for_service "/spawn_entity" 45; then
+  if ! wait_for_service "/spawn_entity" "${_gz_wait}" "等待 spawn_entity 二次就绪"; then
     echo "ERROR: 预处理结束后 /spawn_entity 仍不可用，请查看 ${TB3_LOG_DIR}/gzserver.log" >&2
     exit 1
   fi
   local spawn_t0=$SECONDS
   local spawn_attempt=1
   local spawn_max=3
+  local spawn_cli_timeout="${TB3_SPAWN_ENTITY_TIMEOUT_SEC:-86400}"
+  [[ "${spawn_cli_timeout}" =~ ^[0-9]+([.][0-9]+)?$ ]] || spawn_cli_timeout=86400
   while (( spawn_attempt <= spawn_max )); do
     if ros2 run gazebo_ros spawn_entity.py \
-      -timeout 90.0 \
+      -timeout "${spawn_cli_timeout}" \
       -entity "${TURTLEBOT3_MODEL}" \
       -file "${spawn_model_file}" \
       -x "${ROBOT_START_X}" -y "${ROBOT_START_Y}" -z "${ROBOT_START_Z}" -Y "${ROBOT_START_YAW}" \
@@ -558,7 +568,7 @@ do_start() {
     if (( spawn_attempt < spawn_max )); then
       echo "WARNING: spawn_entity 第 ${spawn_attempt}/${spawn_max} 次失败，3s 后重试（见 ${TB3_LOG_DIR}/spawn_entity.log）" >&2
       sleep 3
-      wait_for_service "/spawn_entity" 30 || true
+      wait_for_service "/spawn_entity" "${_gz_wait}" "等待 spawn_entity 重试就绪" || true
     else
       echo "ERROR: gazebo_ros spawn_entity.py 失败（已重试 ${spawn_max} 次）。常见: gzserver 异常、实体名冲突、WSL/DDS 滞后。" >&2
       echo "  完整日志: ${TB3_LOG_DIR}/spawn_entity.log" >&2
@@ -712,7 +722,7 @@ do_check() {
     topics+=(/map)
   fi
   for topic in "${topics[@]}"; do
-    if ros2 topic info "${topic}" >/dev/null 2>&1; then
+    if ros2 topic list --no-daemon --spin-time 1.0 2>/dev/null | grep -Fxq "${topic}"; then
       echo "OK   ${topic}"
     else
       echo "MISS ${topic}"
@@ -767,7 +777,8 @@ Common GUI env switches:
   TB3_YOLO_DEPTH_REGISTER=0        depth_image_proc register; 1=RGB grid (需 TF 正常).
   TB3_YOLO_DEPTH_SAMPLE_STAT=min     ROI depth: min|median|trimmed_mean (min 避免远墙 median).
   TB3_YOLO_DEPTH_RANGE_TO_OPTICAL_Z=true  Tilted camera: range->optical Z.
-  TB3_GZSERVER_WAIT_SEC=90         Max wait for /spawn_entity after gzserver start (run_simulation uses 120).
+  TB3_GZSERVER_WAIT_SEC=0          Max wait for /spawn_entity after gzserver start; 0/inf means no time limit.
+  TB3_SPAWN_ENTITY_TIMEOUT_SEC=86400 Timeout passed to gazebo_ros spawn_entity.py.
   TB3_ROBOT_DESCRIPTION_TOPIC_HZ=2 Rate for publishing /robot_description (std_msgs/String) for RViz.
 
 This simplified stack keeps only:

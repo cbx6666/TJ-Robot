@@ -14,6 +14,23 @@ from rclpy.node import Node
 from std_msgs.msg import String
 
 
+_FETCH_LABEL_ALIASES: tuple[tuple[str, str], ...] = (
+    ("水杯", "cup"),
+    ("茶杯", "cup"),
+    ("杯子", "cup"),
+    ("杯", "cup"),
+    ("可乐罐", "bottle"),
+    ("可乐", "bottle"),
+    ("瓶子", "bottle"),
+    ("瓶", "bottle"),
+    ("花瓶", "vase"),
+    ("椅子", "chair"),
+    ("书本", "book"),
+    ("书", "book"),
+    ("手机", "cell phone"),
+)
+
+
 def _load_text_file(path: str) -> str:
     p = Path(path)
     if not p.is_file():
@@ -149,6 +166,49 @@ def _fix_turn_intent(obj: dict[str, Any], user_text: str) -> dict[str, Any]:
     args["yaw_only"] = True
     args["relative_yaw_deg"] = signed
     args.pop("yaw_delta_deg", None)
+    return {**obj, "args": args}
+
+
+def _canonical_fetch_label(raw: str, user_text: str = "") -> str:
+    text = (raw or "").strip()
+    low = text.lower().replace("_", " ")
+    direct = {
+        "cup": "cup",
+        "mug": "cup",
+        "water cup": "cup",
+        "bottle": "bottle",
+        "beer": "bottle",
+        "coke": "bottle",
+        "coke can": "bottle",
+        "vase": "vase",
+        "chair": "chair",
+        "book": "book",
+        "cell phone": "cell phone",
+        "phone": "cell phone",
+    }
+    if low in direct:
+        return direct[low]
+    probe = f"{text} {user_text}".strip()
+    for zh, label in _FETCH_LABEL_ALIASES:
+        if zh in probe:
+            return label
+    return text or "object"
+
+
+def _normalize_fetch_intent(obj: dict[str, Any], user_text: str) -> dict[str, Any]:
+    if str(obj.get("command", "")).strip() != "fetch_object":
+        return obj
+    args = obj.get("args") if isinstance(obj.get("args"), dict) else {}
+    args = dict(args)
+    raw_label = ""
+    for key in ("object_label", "label", "object", "target"):
+        v = args.get(key)
+        if v is not None and str(v).strip():
+            raw_label = str(v).strip()
+            break
+    args["object_label"] = _canonical_fetch_label(raw_label, user_text)
+    if user_text:
+        args["user_request_zh"] = user_text
     return {**obj, "args": args}
 
 
@@ -316,6 +376,7 @@ class LlmRouterNode(Node):
         text = (msg.data or "").strip()
         if not text:
             return
+        self.get_logger().info(f"[llm_router] user_text={text}")
         self.get_logger().info(f"[llm_router] 收到语音文本: {text!r}")
         # 在订阅回调内同步调用，避免非 executor 线程调用 publish（rclpy 非线程安全）。
         api_key = os.environ.get(self._key_env, "").strip()
@@ -327,9 +388,15 @@ class LlmRouterNode(Node):
             obj = _offline_plan(text)
         obj = _validate_cmd(obj)
         obj = _fix_turn_intent(obj, text)
+        obj = _normalize_fetch_intent(obj, text)
         payload = json.dumps(obj, ensure_ascii=False)
         self._pub_intent.publish(String(data=payload))
         self.get_logger().info(f"[llm_router] parsed_intent: {payload}")
+        args = obj.get("args") if isinstance(obj.get("args"), dict) else {}
+        self.get_logger().info(
+            f"[llm_router] parsed_intent={obj.get('command', 'noop')} "
+            f"object_label={args.get('object_label', '')}"
+        )
         if self._pub_fetch and obj.get("command") == "fetch_object":
             args = obj.get("args") or {}
             label = str(args.get("object_label", "object"))

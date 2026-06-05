@@ -2,6 +2,7 @@
 
 <sdf version='1.6'>
   <world name='default'>
+    <plugin name='gazebo_ros_state' filename='libgazebo_ros_state.so'/>
     <!-- override the default position of the camera !-->
     <gui>
       <camera name='gzclient_camera'>
@@ -123,6 +124,7 @@
     </model>
 
     <model name='coke_can'>
+      <static>true</static>
       <link name='link'>
         <inertial>
           <pose>0 0 0 0 -0 0</pose>
@@ -139,9 +141,10 @@
         <collision name='collision'>
           <pose>0.003937 0.004724 -0.18 0 -0 0</pose>
           <geometry>
-            <mesh>
-              <uri>model://coke_can/meshes/coke_can.dae</uri>
-            </mesh>
+            <cylinder>
+              <radius>0.035</radius>
+              <length>0.12</length>
+            </cylinder>
           </geometry>
           <surface>
             <friction>
@@ -168,10 +171,16 @@
         <visual name='visual'>
           <pose>0.003937 0.004724 -0.18 0 -0 0</pose>
           <geometry>
-            <mesh>
-              <uri>model://coke_can/meshes/coke_can.dae</uri>
-            </mesh>
+            <cylinder>
+              <radius>0.035</radius>
+              <length>0.12</length>
+            </cylinder>
           </geometry>
+          <material>
+            <ambient>0.80 0.05 0.05 1</ambient>
+            <diffuse>0.90 0.08 0.08 1</diffuse>
+            <specular>0.30 0.30 0.30 1</specular>
+          </material>
         </visual>
         <self_collide>0</self_collide>
         <enable_wind>0</enable_wind>

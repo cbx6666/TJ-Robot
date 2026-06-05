@@ -40,6 +40,7 @@ class _State(str, Enum):
     SEARCHING = "searching"
     APPROACHING = "approaching"
     PICKING = "picking"
+    RETURNING = "returning"
     DONE = "done"
     FAILED = "failed"
 
@@ -53,6 +54,18 @@ _LABEL_ZH = {
     "cell phone": "手机",
 }
 
+_LABEL_ALIASES: tuple[tuple[str, str], ...] = (
+    ("水杯", "cup"),
+    ("茶杯", "cup"),
+    ("杯子", "cup"),
+    ("杯", "cup"),
+    ("可乐罐", "bottle"),
+    ("可乐", "bottle"),
+    ("瓶子", "bottle"),
+    ("瓶", "bottle"),
+    ("花瓶", "vase"),
+)
+
 
 def _label_zh(label: str) -> str:
     low = (label or "").strip().lower()
@@ -62,6 +75,37 @@ def _label_zh(label: str) -> str:
         if zh in (label or ""):
             return zh
     return label or "物体"
+
+
+def _canonical_label(label: str) -> str:
+    raw = (label or "").strip()
+    low = raw.lower().replace("_", " ")
+    direct = {
+        "cup": "cup",
+        "mug": "cup",
+        "water cup": "cup",
+        "bottle": "bottle",
+        "beer": "bottle",
+        "coke": "bottle",
+        "coke can": "bottle",
+        "vase": "vase",
+        "chair": "chair",
+        "book": "book",
+        "cell phone": "cell phone",
+        "phone": "cell phone",
+    }
+    if low in direct:
+        return direct[low]
+    for zh, en in _LABEL_ALIASES:
+        if zh in raw:
+            return en
+    return raw or "object"
+
+
+def _fmt_xyz(pt: tuple[float, float, float] | None) -> str:
+    if pt is None:
+        return "(none)"
+    return f"({pt[0]:.3f},{pt[1]:.3f},{pt[2]:.3f})"
 
 
 class ObjectFetchOrchestratorNode(Node):
@@ -78,15 +122,15 @@ class ObjectFetchOrchestratorNode(Node):
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("approach_standoff_m", 0.55)
         self.declare_parameter("target_stable_samples", 5)
-        self.declare_parameter("target_stable_max_jump_m", 0.25)
+        self.declare_parameter("target_stable_max_jump_m", 0.15)
         self.declare_parameter("target_tentative_samples", 2)
         self.declare_parameter("target_tentative_max_jump_m", 0.45)
-        self.declare_parameter("target_point_stale_sec", 0.7)
-        self.declare_parameter("target_lost_resume_patrol_sec", 2.5)
-        self.declare_parameter("approach_replan_min_shift_m", 0.35)
+        self.declare_parameter("target_point_stale_sec", 1.0)
+        self.declare_parameter("target_lost_resume_patrol_sec", 5.0)
         self.declare_parameter("search_timeout_sec", 180.0)
         self.declare_parameter("approach_timeout_sec", 120.0)
         self.declare_parameter("pick_verify_timeout_sec", 45.0)
+        self.declare_parameter("return_timeout_sec", 120.0)
         self.declare_parameter("cmd_vel_topic", "/cmd_vel")
         self.declare_parameter("nav2_ready_timeout_sec", 120.0)
         self.declare_parameter("cmd_vel_brake_bursts", 12)
@@ -106,10 +150,10 @@ class ObjectFetchOrchestratorNode(Node):
         self._tentative_jump = float(self.get_parameter("target_tentative_max_jump_m").value)
         self._point_stale_sec = float(self.get_parameter("target_point_stale_sec").value)
         self._target_lost_sec = float(self.get_parameter("target_lost_resume_patrol_sec").value)
-        self._replan_shift = float(self.get_parameter("approach_replan_min_shift_m").value)
         self._search_timeout = float(self.get_parameter("search_timeout_sec").value)
         self._approach_timeout = float(self.get_parameter("approach_timeout_sec").value)
         self._pick_timeout = float(self.get_parameter("pick_verify_timeout_sec").value)
+        self._return_timeout = float(self.get_parameter("return_timeout_sec").value)
         self._nav_ready_timeout = float(self.get_parameter("nav2_ready_timeout_sec").value)
         self._brake_bursts = int(self.get_parameter("cmd_vel_brake_bursts").value)
 
@@ -128,14 +172,21 @@ class ObjectFetchOrchestratorNode(Node):
         self._search_started = 0.0
         self._approach_started = 0.0
         self._pick_started = 0.0
+        self._return_started = 0.0
+        self._home_pose: tuple[float, float, float] | None = None
+        self._pending_task_ok = False
+        self._pending_task_detail = ""
         self._target_buf: deque[tuple[float, float, float]] = deque(maxlen=max(self._stable_n, self._tentative_n))
         self._locked_target: tuple[float, float, float] | None = None
         self._latest_label = ""
+        self._last_target_frame = ""
         self._last_target_rx = 0.0
         self._target_map_valid = False
         self._patrol_stopped_for_target = False
         self._approach_confirmed = False
-        self._last_replan_mono = 0.0
+        self._last_yolo_search_log_mono = 0.0
+        self._last_yolo_lost_log_mono = 0.0
+        self._approach_lost_since = 0.0
 
         self._tf_buffer = None
         self._tf_listener = None
@@ -153,7 +204,8 @@ class ObjectFetchOrchestratorNode(Node):
         self.get_logger().info(
             f"[object_fetch] events={self._events_topic} target={self._target_topic} "
             f"nav={action_name!r} standoff={self._standoff}m "
-            f"tentative={self._tentative_n}@{self._tentative_jump}m stable={self._stable_n}"
+            f"stable_frames>={self._stable_n} stable_std<={self._stable_jump:.2f}m "
+            f"target_age<={self._point_stale_sec:.1f}s"
         )
 
     def _on_task_event(self, msg: String) -> None:
@@ -175,7 +227,7 @@ class ObjectFetchOrchestratorNode(Node):
             if source == "object_fetch":
                 return
             if self._state not in (_State.IDLE, _State.DONE, _State.FAILED):
-                self._fail("canceled_by_stop")
+                self._abort("canceled_by_stop")
 
     def _begin_fetch(self, args: dict[str, Any]) -> None:
         if self._state not in (_State.IDLE, _State.DONE, _State.FAILED):
@@ -187,26 +239,50 @@ class ObjectFetchOrchestratorNode(Node):
             if v is not None and str(v).strip():
                 label = str(v).strip()
                 break
-        self._object_label = label
+        self._object_label = _canonical_label(label)
         self._object_zh = _label_zh(label)
+        self._home_pose = self._robot_xy_yaw()
+        if self._home_pose is None:
+            self.get_logger().warning("[object_fetch] 无法记录接令位置，拒绝启动取物任务")
+            self._state = _State.FAILED
+            self._publish_event(
+                {
+                    "event": "fetch_object_done",
+                    "ok": False,
+                    "pick_ok": False,
+                    "return_ok": False,
+                    "object_label": self._object_label,
+                    "reason": "initial_pose_unavailable",
+                    "return_reason": "initial_pose_unavailable",
+                }
+            )
+            return
         self._reset_search_state()
         self._state = _State.SEARCHING
         self._search_started = self.get_clock().now().nanoseconds * 1e-9
+        hx, hy, hyaw = self._home_pose
         self.get_logger().info(
-            f"[object_fetch] 开始搜索 label={label!r} → 启动覆盖巡检"
+            f"[object_fetch] 开始搜索 label={self._object_label!r} → 启动覆盖巡检；"
+            f"记录返航点=({hx:.3f},{hy:.3f}) yaw={math.degrees(hyaw):.1f}°"
         )
         self._publish_event(
             {
                 "event": "fetch_object_started",
-                "object_label": label,
+                "object_label": self._object_label,
                 "phase": "search",
+                "home_pose": {
+                    "frame_id": self._map_frame,
+                    "x": hx,
+                    "y": hy,
+                    "yaw": hyaw,
+                },
             }
         )
         self._publish_event(
             {
                 "event": "patrol_start",
                 "scope": "object_search",
-                "object_label": label,
+                "object_label": self._object_label,
             }
         )
 
@@ -217,7 +293,9 @@ class ObjectFetchOrchestratorNode(Node):
         self._target_map_valid = False
         self._patrol_stopped_for_target = False
         self._approach_confirmed = False
-        self._last_replan_mono = 0.0
+        self._last_yolo_search_log_mono = 0.0
+        self._last_yolo_lost_log_mono = 0.0
+        self._approach_lost_since = 0.0
 
     def _on_target_map_valid(self, msg: Bool) -> None:
         self._target_map_valid = bool(msg.data)
@@ -237,25 +315,51 @@ class ObjectFetchOrchestratorNode(Node):
             return
         now = self.get_clock().now().nanoseconds * 1e-9
         self._last_target_rx = now
+        self._last_target_frame = frame
         pt = (float(p.x), float(p.y), float(p.z))
         self._target_buf.append(pt)
-        if self._state == _State.APPROACHING and self._locked_target is not None:
-            self._maybe_update_locked_target(pt)
+        if self._state == _State.SEARCHING:
+            self._log_yolo_search_seen(now, pt)
 
     def _on_target_label(self, msg: String) -> None:
         self._latest_label = (msg.data or "").strip()
 
-    def _cluster_from_buf(self, n: int, max_jump: float) -> tuple[float, float, float] | None:
-        if len(self._target_buf) < n:
-            return None
-        pts = list(self._target_buf)[-n:]
+    def _target_stats(
+        self, n: int | None = None
+    ) -> tuple[int, tuple[float, float, float] | None, float]:
+        if not self._target_buf:
+            return (0, None, math.inf)
+        pts = list(self._target_buf)
+        if n is not None:
+            pts = pts[-n:]
         cx = sum(p[0] for p in pts) / len(pts)
         cy = sum(p[1] for p in pts) / len(pts)
         cz = sum(p[2] for p in pts) / len(pts)
-        for x, y, _ in pts:
-            if math.hypot(x - cx, y - cy) > max_jump:
-                return None
-        return (cx, cy, cz)
+        variance = sum((p[0] - cx) ** 2 + (p[1] - cy) ** 2 for p in pts) / len(pts)
+        return (len(pts), (cx, cy, cz), math.sqrt(max(variance, 0.0)))
+
+    def _log_yolo_search_seen(self, now: float, pt: tuple[float, float, float]) -> None:
+        mono = time.monotonic()
+        if mono - self._last_yolo_search_log_mono < 0.5:
+            return
+        self._last_yolo_search_log_mono = mono
+        frames, _mean, std = self._target_stats(min(len(self._target_buf), self._stable_n))
+        age = now - self._last_target_rx if self._last_target_rx > 0.0 else math.inf
+        self.get_logger().info(
+            "[object_fetch] yolo_target_seen "
+            f"label={self._object_label} yolo_label={self._latest_label!r} "
+            f"target_frame={self._last_target_frame or self._map_frame} "
+            f"target_xyz_map={_fmt_xyz(pt)} stable_frames={frames} "
+            f"target_std={std:.3f} age={age:.3f}s"
+        )
+
+    def _cluster_from_buf(self, n: int, max_std: float) -> tuple[float, float, float] | None:
+        if len(self._target_buf) < n:
+            return None
+        _frames, mean, std = self._target_stats(n)
+        if mean is None or std > max_std:
+            return None
+        return mean
 
     def _target_is_stable(self) -> tuple[float, float, float] | None:
         return self._cluster_from_buf(self._stable_n, self._stable_jump)
@@ -288,49 +392,53 @@ class ObjectFetchOrchestratorNode(Node):
                     self._target_buf.clear()
                 return
             stable = self._target_is_stable()
-            tentative = self._target_is_tentative()
             if stable is not None:
                 self._stop_patrol_for_target("target_stable")
                 self._begin_approach(stable, confirmed=True)
-            elif tentative is not None:
-                self._stop_patrol_for_target("target_tentative")
-                self._begin_approach(tentative, confirmed=False)
         elif self._state == _State.APPROACHING:
             if now - self._approach_started > self._approach_timeout:
+                self.get_logger().warning("[object_fetch] nav_timeout reason=approach_timeout")
                 self._fail("approach_timeout")
                 return
-            if self._target_feed_stale(now) or not self._target_map_valid:
-                if self._last_target_rx > 0.0 and (now - self._last_target_rx) > self._target_lost_sec:
-                    self._resume_patrol_search("target_lost")
+            self._handle_approach_yolo_lost(now)
         elif self._state == _State.PICKING:
             if now - self._pick_started > self._pick_timeout:
                 self._fail("pick_verify_timeout")
+        elif self._state == _State.RETURNING:
+            if (
+                self._return_started > 0.0
+                and now - self._return_started > self._return_timeout
+            ):
+                self.get_logger().warning("[object_fetch] 返航超时")
+                self._cancel_nav_goal()
+                publish_cmd_vel_brake(self._cmd_vel_pub, bursts=self._brake_bursts)
+                self._finish_task(return_ok=False, return_reason="return_timeout")
 
-    def _maybe_update_locked_target(self, pt: tuple[float, float, float]) -> None:
-        if self._locked_target is None:
+    def _handle_approach_yolo_lost(self, now: float) -> None:
+        lost = self._target_feed_stale(now) or not self._target_map_valid
+        if not lost:
+            self._approach_lost_since = 0.0
             return
-        lx, ly, _ = self._locked_target
-        shift = math.hypot(pt[0] - lx, pt[1] - ly)
-        alpha = 0.55
-        self._locked_target = (
-            alpha * pt[0] + (1.0 - alpha) * lx,
-            alpha * pt[1] + (1.0 - alpha) * ly,
-            alpha * pt[2] + (1.0 - alpha) * self._locked_target[2],
-        )
-        now_mono = time.monotonic()
-        if shift >= self._replan_shift and (now_mono - self._last_replan_mono) > 1.5:
-            self._last_replan_mono = now_mono
+        if self._approach_lost_since <= 0.0:
+            self._approach_lost_since = now
+        mono = time.monotonic()
+        if mono - self._last_yolo_lost_log_mono >= 1.0:
+            self._last_yolo_lost_log_mono = mono
+            last_age = now - self._last_target_rx if self._last_target_rx > 0.0 else math.inf
+            lost_for = now - self._approach_lost_since
             self.get_logger().info(
-                f"[object_fetch] 目标移动 {shift:.2f}m，重新规划接近点"
+                "[object_fetch] yolo_lost_in_approach_continue_locked_target "
+                f"label={self._object_label} locked_xyz={_fmt_xyz(self._locked_target)} "
+                f"lost_for={lost_for:.2f}s last_seen_age={last_age:.2f}s "
+                "action=keep_navigating"
             )
-            self._cancel_nav_goal()
-            self._start_approach(self._locked_target)
 
     def _resume_patrol_search(self, reason: str) -> None:
         if self._state != _State.APPROACHING:
             return
         self.get_logger().warning(
-            f"[object_fetch] 目标持续不可见 ({reason})，取消接近并恢复巡检"
+            f"[object_fetch] target_lost_exceeded_threshold reason={reason} "
+            f"locked_xyz={_fmt_xyz(self._locked_target)}"
         )
         self._cancel_nav_goal()
         publish_cmd_vel_brake(self._cmd_vel_pub, bursts=self._brake_bursts)
@@ -377,18 +485,21 @@ class ObjectFetchOrchestratorNode(Node):
         if self._state not in (_State.SEARCHING, _State.APPROACHING):
             return
         if self._state == _State.APPROACHING:
-            self._locked_target = target
-            if confirmed:
-                self._approach_confirmed = True
             return
         self._locked_target = target
         self._state = _State.APPROACHING
         self._approach_started = self.get_clock().now().nanoseconds * 1e-9
         self._approach_confirmed = confirmed
         phase = "approach" if confirmed else "approach_tentative"
+        frames, _mean, std = self._target_stats(self._stable_n)
         self.get_logger().info(
             f"[object_fetch] {'稳定' if confirmed else '疑似'}目标 @ map "
             f"({target[0]:.2f},{target[1]:.2f}) label={self._latest_label!r} → NavigateToPose"
+        )
+        self.get_logger().info(
+            f"[object_fetch] locked_target label={self._object_label} "
+            f"xyz={_fmt_xyz(self._locked_target)} stable_frames={frames} "
+            f"target_std={std:.3f}"
         )
         self._publish_event(
             {
@@ -454,18 +565,31 @@ class ObjectFetchOrchestratorNode(Node):
             f"[object_fetch] NavigateToPose → ({ax:.2f},{ay:.2f}) yaw={math.degrees(yaw):.1f}° "
             f"（物体 @ {target[0]:.2f},{target[1]:.2f}）"
         )
+        self.get_logger().info(
+            f"[object_fetch] nav_goal_sent label={self._object_label} "
+            f"goal_xyz_map=({ax:.3f},{ay:.3f},0.000) "
+            f"goal_yaw_deg={math.degrees(yaw):.1f} "
+            f"locked_xyz={_fmt_xyz(self._locked_target)}"
+        )
         fut = self._nav_client.send_goal_async(goal)
         fut.add_done_callback(self._nav_goal_response_cb)
 
     def _nav_goal_response_cb(self, future: Any) -> None:
-        if self._state != _State.APPROACHING:
-            return
         try:
             gh = future.result()
         except Exception as e:
-            self._fail(f"nav_send_error:{e}")
+            if self._state == _State.APPROACHING:
+                self.get_logger().warning(
+                    f"[object_fetch] nav_failed reason=nav_send_error detail={e}"
+                )
+                self._fail(f"nav_send_error:{e}")
+            return
+        if self._state != _State.APPROACHING:
+            if gh.accepted:
+                self._nav_client.cancel_goal_async(gh)
             return
         if not gh.accepted:
+            self.get_logger().warning("[object_fetch] nav_failed reason=nav_goal_rejected")
             self._fail("nav_goal_rejected")
             return
         with self._goal_lock:
@@ -473,25 +597,31 @@ class ObjectFetchOrchestratorNode(Node):
         gh.get_result_async().add_done_callback(self._nav_result_cb)
 
     def _nav_result_cb(self, future: Any) -> None:
-        with self._goal_lock:
-            self._nav_handle = None
         if self._state != _State.APPROACHING:
             return
+        with self._goal_lock:
+            self._nav_handle = None
         try:
             wrapper = future.result()
             status = int(wrapper.status)
         except Exception as e:
+            self.get_logger().warning(f"[object_fetch] nav_failed reason=nav_result_error detail={e}")
             self._fail(f"nav_result_error:{e}")
             return
         publish_cmd_vel_brake(self._cmd_vel_pub, bursts=self._brake_bursts)
         if status == GoalStatus.STATUS_CANCELED:
             return
         if status != GoalStatus.STATUS_SUCCEEDED:
+            self.get_logger().warning(f"[object_fetch] nav_failed status={status}")
             if not self._target_feed_stale(self.get_clock().now().nanoseconds * 1e-9):
                 self._resume_patrol_search(f"nav_status_{status}")
             else:
                 self._fail(f"nav_status_{status}")
             return
+        self.get_logger().info(
+            f"[object_fetch] nav_goal_reached label={self._object_label} "
+            f"locked_xyz={_fmt_xyz(self._locked_target)}"
+        )
         if self._locked_target is None:
             self._fail("no_locked_target")
             return
@@ -506,11 +636,15 @@ class ObjectFetchOrchestratorNode(Node):
                 self._locked_target = stable
                 self._approach_confirmed = True
         tx, ty, tz = self._locked_target
-        coord = f"target_frame={self._map_frame};target_xyz={tx:.3f},{ty:.3f},{tz:.3f}"
-        cmd = f"PICK:{self._object_zh};{coord}"
+        coord = f"locked_target_frame={self._map_frame};locked_target_xyz={tx:.3f},{ty:.3f},{tz:.3f}"
+        cmd = f"PICK:{self._object_label};{coord}"
         self._state = _State.PICKING
         self._pick_started = self.get_clock().now().nanoseconds * 1e-9
         self.get_logger().info(f"[object_fetch] 导航到位，请求抓取: {cmd}")
+        self.get_logger().info(
+            f"[object_fetch] pick_command_sent label={self._object_label} "
+            f"locked_xyz={_fmt_xyz(self._locked_target)}"
+        )
         self._mani_pub.publish(String(data=cmd))
         self._publish_event({"event": "fetch_object_phase", "phase": "pick_verify"})
 
@@ -518,40 +652,170 @@ class ObjectFetchOrchestratorNode(Node):
         if self._state != _State.PICKING:
             return
         text = (msg.data or "").strip()
-        if "picked" in text.lower() and "failed" not in text.lower():
+        low = text.lower()
+        if ("pick_success" in low or "picked" in low) and "failed" not in low:
             self._succeed(text)
-        elif "pick_failed" in text.lower() or "not_in_range" in text.lower():
+        elif "pick_failed" in low or "not_in_range" in low:
             self._fail(text[:120])
 
     def _succeed(self, detail: str) -> None:
-        self.get_logger().info(f"[object_fetch] 完成: {detail}")
-        self._state = _State.DONE
-        self._publish_event(
-            {
-                "event": "fetch_object_done",
-                "ok": True,
-                "object_label": self._object_label,
-                "detail": detail,
-            }
-        )
+        self.get_logger().info(f"[object_fetch] mock 抓取成功: {detail}")
+        self._begin_return(task_ok=True, detail=detail)
 
     def _fail(self, reason: str) -> None:
         self.get_logger().warning(f"[object_fetch] 失败: {reason}")
         publish_cmd_vel_brake(self._cmd_vel_pub, bursts=self._brake_bursts)
         self._cancel_nav_goal()
-        if self._state == _State.SEARCHING and self._patrol_stopped_for_target:
+        if self._state == _State.SEARCHING:
             self._publish_event({"event": "stop", "source": "object_fetch", "reason": reason})
-        elif self._state == _State.SEARCHING:
-            self._publish_event({"event": "stop", "source": "object_fetch", "reason": reason})
+        self._begin_return(task_ok=False, detail=reason)
+
+    def _abort(self, reason: str) -> None:
+        self.get_logger().warning(f"[object_fetch] 中止且不返航: {reason}")
+        publish_cmd_vel_brake(self._cmd_vel_pub, bursts=self._brake_bursts)
+        self._cancel_nav_goal()
         self._state = _State.FAILED
         self._publish_event(
             {
                 "event": "fetch_object_done",
                 "ok": False,
+                "pick_ok": False,
+                "return_ok": False,
                 "object_label": self._object_label,
                 "reason": reason,
+                "return_reason": "return_skipped_by_stop",
             }
         )
+
+    def _begin_return(self, *, task_ok: bool, detail: str) -> None:
+        if self._state == _State.RETURNING:
+            return
+        self._pending_task_ok = task_ok
+        self._pending_task_detail = detail
+        home = self._home_pose
+        if home is None:
+            self._finish_task(return_ok=False, return_reason="initial_pose_unavailable")
+            return
+
+        self._cancel_nav_goal()
+        publish_cmd_vel_brake(self._cmd_vel_pub, bursts=self._brake_bursts)
+        self._state = _State.RETURNING
+        self._return_started = 0.0
+        hx, hy, hyaw = home
+        self.get_logger().info(
+            f"[object_fetch] pre_return_ok={task_ok}，开始返航 "
+            f"goal=({hx:.3f},{hy:.3f}) yaw={math.degrees(hyaw):.1f}°"
+        )
+        self._publish_event(
+            {
+                "event": "fetch_object_phase",
+                "phase": "returning",
+                "pick_ok": task_ok,
+                "home_pose": {
+                    "frame_id": self._map_frame,
+                    "x": hx,
+                    "y": hy,
+                    "yaw": hyaw,
+                },
+            }
+        )
+        nav_ready = wait_for_navigate_to_pose(
+            self,
+            self._nav_client,
+            timeout_sec=self._nav_ready_timeout,
+            log=self.get_logger(),
+        )
+        if self._state != _State.RETURNING:
+            return
+        if not nav_ready:
+            self._finish_task(return_ok=False, return_reason="return_nav2_unavailable")
+            return
+        self._return_started = self.get_clock().now().nanoseconds * 1e-9
+
+        goal = NavigateToPose.Goal()
+        goal.pose = PoseStamped()
+        goal.pose.header.frame_id = self._map_frame
+        goal.pose.header.stamp = self.get_clock().now().to_msg()
+        goal.pose.pose.position.x = hx
+        goal.pose.pose.position.y = hy
+        goal.pose.pose.position.z = 0.0
+        goal.pose.pose.orientation.z = math.sin(hyaw * 0.5)
+        goal.pose.pose.orientation.w = math.cos(hyaw * 0.5)
+        try:
+            future = self._nav_client.send_goal_async(goal)
+        except Exception as e:
+            self._finish_task(
+                return_ok=False,
+                return_reason=f"return_nav_send_error:{e}",
+            )
+            return
+        future.add_done_callback(self._return_goal_response_cb)
+
+    def _return_goal_response_cb(self, future: Any) -> None:
+        try:
+            gh = future.result()
+        except Exception as e:
+            if self._state == _State.RETURNING:
+                self._finish_task(
+                    return_ok=False,
+                    return_reason=f"return_nav_send_error:{e}",
+                )
+            return
+        if self._state != _State.RETURNING:
+            if gh.accepted:
+                self._nav_client.cancel_goal_async(gh)
+            return
+        if not gh.accepted:
+            self._finish_task(return_ok=False, return_reason="return_goal_rejected")
+            return
+        with self._goal_lock:
+            self._nav_handle = gh
+        gh.get_result_async().add_done_callback(self._return_result_cb)
+
+    def _return_result_cb(self, future: Any) -> None:
+        if self._state != _State.RETURNING:
+            return
+        with self._goal_lock:
+            self._nav_handle = None
+        try:
+            wrapper = future.result()
+            status = int(wrapper.status)
+        except Exception as e:
+            self._finish_task(
+                return_ok=False,
+                return_reason=f"return_nav_result_error:{e}",
+            )
+            return
+        publish_cmd_vel_brake(self._cmd_vel_pub, bursts=self._brake_bursts)
+        if status == GoalStatus.STATUS_SUCCEEDED:
+            self.get_logger().info("[object_fetch] 已返回接令位置")
+            self._finish_task(return_ok=True)
+            return
+        self.get_logger().warning(f"[object_fetch] 返航失败 status={status}")
+        self._finish_task(
+            return_ok=False,
+            return_reason=f"return_nav_status_{status}",
+        )
+
+    def _finish_task(self, *, return_ok: bool, return_reason: str = "") -> None:
+        task_ok = self._pending_task_ok
+        detail = self._pending_task_detail
+        overall_ok = task_ok and return_ok
+        self._state = _State.DONE if overall_ok else _State.FAILED
+        event: dict[str, Any] = {
+            "event": "fetch_object_done",
+            "ok": overall_ok,
+            "pick_ok": task_ok,
+            "return_ok": return_ok,
+            "object_label": self._object_label,
+        }
+        if task_ok:
+            event["detail"] = detail
+        else:
+            event["reason"] = detail
+        if return_reason:
+            event["return_reason"] = return_reason
+        self._publish_event(event)
 
     def _publish_event(self, data: dict[str, Any]) -> None:
         try:

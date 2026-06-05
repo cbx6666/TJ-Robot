@@ -282,9 +282,9 @@ full_system_load_nav2_map_from_file() {
 full_system_start_sim_and_nav2() {
   if pgrep -af voice_gateway_node >/dev/null 2>&1 \
     || pgrep -af 'task_pipeline\.launch\.py' >/dev/null 2>&1; then
-    export TB3_SKIP_DAEMON_STOP=1
-    echo "WARN: 检测到语音栈已在运行；tb3_stack 将跳过 ros2 daemon stop（避免语音节点失联）。"
-    echo "      日常请用 bash scripts/run_full_system.sh 或 run_full_system_real_mic.sh 一键起栈"
+    echo "WARN: 检测到旧语音/任务管线，先清理旧节点，避免同名 orchestrator/mock 重复运行。"
+    full_system_stop_voice_stack
+    unset TB3_SKIP_DAEMON_STOP
   fi
   echo "Starting RGBD simulation + YOLO (YOLO_IMAGE_TOPIC=${YOLO_IMAGE_TOPIC}, unified=${TB3_SIM_UNIFIED_RGBD})."
   bash "${PROJECT_ROOT}/scripts/tb3_stack.sh" start
@@ -337,6 +337,8 @@ full_system_stop_voice_stack() {
   pkill -f 'llm_router_node' 2>/dev/null || true
   pkill -f 'task_manager_node' 2>/dev/null || true
   pkill -f 'command_executor_node' 2>/dev/null || true
+  pkill -f 'object_fetch_orchestrator_node' 2>/dev/null || true
+  pkill -f 'mock_pick_place_node' 2>/dev/null || true
   pkill -f 'patrol_waypoints' 2>/dev/null || true
   sleep 1
   if pgrep -af voice_gateway_node >/dev/null 2>&1; then

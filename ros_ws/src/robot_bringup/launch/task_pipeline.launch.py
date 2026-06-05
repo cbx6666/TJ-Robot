@@ -38,6 +38,11 @@ def generate_launch_description():
     mic_health_interval_sec = LaunchConfiguration("mic_health_interval_sec")
     mic_stall_alert_sec = LaunchConfiguration("mic_stall_alert_sec")
     enable_sim_speech_gui = LaunchConfiguration("enable_sim_speech_gui")
+    pick_min_distance_m = LaunchConfiguration("pick_min_distance_m")
+    pick_max_distance_m = LaunchConfiguration("pick_max_distance_m")
+    pick_max_yaw_error_deg = LaunchConfiguration("pick_max_yaw_error_deg")
+    pick_delay_min_sec = LaunchConfiguration("pick_delay_min_sec")
+    pick_delay_max_sec = LaunchConfiguration("pick_delay_max_sec")
 
     share = get_package_share_directory("robot_bringup")
     default_map = os.path.join(share, "maps", "map.yaml")
@@ -70,6 +75,11 @@ def generate_launch_description():
         DeclareLaunchArgument("mic_health_interval_sec", default_value="5.0"),
         DeclareLaunchArgument("mic_stall_alert_sec", default_value="4.0"),
         DeclareLaunchArgument("enable_sim_speech_gui", default_value="false"),
+        DeclareLaunchArgument("pick_min_distance_m", default_value="0.0"),
+        DeclareLaunchArgument("pick_max_distance_m", default_value="1.5"),
+        DeclareLaunchArgument("pick_max_yaw_error_deg", default_value="90.0"),
+        DeclareLaunchArgument("pick_delay_min_sec", default_value="2.0"),
+        DeclareLaunchArgument("pick_delay_max_sec", default_value="5.0"),
         _inc(
             share,
             "interaction.launch.py",
@@ -103,5 +113,16 @@ def generate_launch_description():
                 "map_yaml": map_yaml,
             },
         ),
-        _inc(share, "manipulation.launch.py", {"use_sim_time": use_sim_time}),
+        _inc(
+            share,
+            "manipulation.launch.py",
+            {
+                "use_sim_time": use_sim_time,
+                "pick_min_distance_m": pick_min_distance_m,
+                "pick_max_distance_m": pick_max_distance_m,
+                "pick_max_yaw_error_deg": pick_max_yaw_error_deg,
+                "pick_delay_min_sec": pick_delay_min_sec,
+                "pick_delay_max_sec": pick_delay_max_sec,
+            },
+        ),
     ])

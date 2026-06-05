@@ -490,6 +490,12 @@ class NavigationManager:
         event_name = str(event.get("event", "")).strip()
         if event_name == "patrol_start":
             if self._is_patrolling:
+                if self._patrol_cancel_requested:
+                    self._patrol_start_requested = True
+                    self._navigator.get_logger().info(
+                        "PATROL_EVENT_START queued until current patrol stops"
+                    )
+                    return
                 self._navigator.get_logger().info(
                     "Patrol already running; ignore duplicate patrol_start"
                 )
@@ -508,10 +514,6 @@ class NavigationManager:
                 self._navigator.get_logger().info(
                     f"PATROL_EVENT_STOP cancel requested source={source or 'unknown'}"
                 )
-                try:
-                    self._navigator.cancelTask()
-                except Exception:
-                    pass
             else:
                 self._navigator.get_logger().info(
                     f"PATROL_EVENT_STOP (pre-loop) source={source or 'unknown'}"
@@ -556,6 +558,7 @@ class NavigationManager:
         stuck_outcome: NavOutcome | None = None
         skip_reason = ""
         escape_events = 0
+        goal_active = False
         self._active_route = None
         self._active_goal = None
         self._no_motion_count = 0
@@ -563,9 +566,15 @@ class NavigationManager:
         state = self._transition(state, NavState.PLANNING, "waypoint_start")
         while rclpy.ok() and state != NavState.DONE:
             if self._patrol_cancel_requested:
-                skip_reason = "patrol_stop_event"
-                state = self._transition(state, NavState.SKIP_WAYPOINT, skip_reason)
-                continue
+                if goal_active:
+                    self._cancel_active_goal(selected_route, "patrol_stop_event")
+                    goal_active = False
+                self._navigator.get_logger().info(
+                    f"WAYPOINT_CANCELED name={waypoint.name} reason=patrol_stop_event "
+                    f"state={state.value}"
+                )
+                self._transition(state, NavState.DONE, "patrol_canceled")
+                return False
             # 规划类状态共用一套路线选择逻辑。这里不会直接沿用旧路径，必须重新 getPath。
             if state in (
                 NavState.PLANNING,
@@ -589,6 +598,11 @@ class NavigationManager:
                     )
                     continue
 
+                # 路径检查期间会 spin ROS 回调；stop 可能就在这时到达。
+                # 必须在发送 goal 前复核，避免巡检抢占取物导航。
+                if self._patrol_cancel_requested:
+                    continue
+
                 if not self._send_goal(selected_route, index, total):
                     self._mark_failed_signature(selected_route.signature)
                     self._last_failed_signature = selected_route.signature
@@ -597,6 +611,7 @@ class NavigationManager:
                     )
                     continue
 
+                goal_active = True
                 state = self._transition(state, NavState.NAVIGATING, "goal_accepted")
                 continue
 
@@ -607,6 +622,7 @@ class NavigationManager:
                     state = self._transition(state, NavState.SKIP_WAYPOINT, skip_reason)
                     continue
                 outcome = self._monitor_navigation(selected_route)
+                goal_active = False
                 if outcome.status == "canceled":
                     self._navigator.get_logger().info(
                         f"WAYPOINT_CANCELED name={waypoint.name} reason={outcome.reason}"
